@@ -19,14 +19,12 @@ import Foundation
         private var hasStarted = false
         private var hasCompleted = false
         private var isStopped = false
-        private var response: HTTPURLResponse?
         private var capturedResponseBody = Data()
         private var receivedResponseBodyByteCount = 0
         private var transportTask: WindshieldTransportTask?
         private var authenticationChallengeSender: WindshieldAuthenticationChallengeSender?
 
         var transport: WindshieldTransporting = WindshieldURLSessionTransport.shared
-        var logger: WindshieldLogging = WindshieldDisabledLogger.shared
         var recorder: WindshieldRecording = WindshieldTransactionRecorder.shared
 
         override class func canInit(with request: URLRequest) -> Bool {
@@ -68,8 +66,6 @@ import Foundation
                     return
                 }
 
-                logger.log(.request(id: transactionID, request: request))
-
                 let task = transport.makeTask(for: handledRequest, observer: self)
                 transportTask = task
                 task.resume()
@@ -101,7 +97,6 @@ import Foundation
                 )
                 transportTask = nil
                 authenticationChallengeSender = nil
-                response = nil
                 capturedResponseBody.removeAll(keepingCapacity: false)
 
                 return cancellation
@@ -153,7 +148,6 @@ import Foundation
             }
             hasCompleted = true
 
-            logger.log(.failure(id: transactionID, request: request, error: error))
             recorder.record(
                 .failed(
                     id: transactionID,
@@ -165,43 +159,11 @@ import Foundation
             client?.urlProtocol(self, didFailWithError: error)
         }
 
-        private func responseSnapshot() -> (
-            response: HTTPURLResponse?,
-            body: Data,
-            totalBodyByteCount: Int
-        ) {
-            (
-                response: response,
-                body: capturedResponseBody,
-                totalBodyByteCount: receivedResponseBodyByteCount
-            )
-        }
-
         private func capturedBodySnapshot() -> WindshieldBodyCapture {
             .capture(
                 capturedResponseBody,
                 totalByteCount: receivedResponseBodyByteCount,
                 maximumByteCount: Self.maximumCapturedResponseBodySize
-            )
-        }
-
-        private func logResponse(
-            _ response: HTTPURLResponse?,
-            body: Data,
-            totalBodyByteCount: Int
-        ) {
-            guard let response else {
-                return
-            }
-
-            logger.log(
-                .response(
-                    id: transactionID,
-                    request: request,
-                    response: response,
-                    body: body,
-                    totalBodyByteCount: totalBodyByteCount
-                )
             )
         }
     }
@@ -213,7 +175,6 @@ import Foundation
                     return
                 }
 
-                self.response = response as? HTTPURLResponse
                 if let response = response as? HTTPURLResponse {
                     recorder.record(
                         .receivedResponse(
@@ -255,16 +216,8 @@ import Foundation
                 hasCompleted = true
                 transportTask = nil
                 authenticationChallengeSender = nil
-                let snapshot = responseSnapshot()
-
-                logResponse(
-                    snapshot.response,
-                    body: snapshot.body,
-                    totalBodyByteCount: snapshot.totalBodyByteCount
-                )
 
                 if let error {
-                    logger.log(.failure(id: transactionID, request: request, error: error))
                     recorder.record(
                         .failed(
                             id: transactionID,
@@ -296,13 +249,6 @@ import Foundation
                 hasCompleted = true
                 transportTask = nil
                 authenticationChallengeSender = nil
-                let snapshot = responseSnapshot()
-
-                logResponse(
-                    response,
-                    body: snapshot.body,
-                    totalBodyByteCount: snapshot.totalBodyByteCount
-                )
 
                 recorder.record(
                     .redirected(

@@ -32,7 +32,7 @@ import XCTest
             XCTAssertEqual(WindshieldURLProtocol.canonicalRequest(for: original), original)
         }
 
-        func testStartLoadingPassesAHandledCopyToTheTransportAndLogsRequestDetails() throws {
+        func testStartLoadingPassesAHandledCopyToTheTransportAndRecordsRequestDetails() throws {
             var original = request(url: "https://example.com/items")
             original.httpMethod = "PATCH"
             original.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -56,11 +56,6 @@ import XCTest
             )
             XCTAssertEqual(context.transport.task.resumeCallCount, 1)
 
-            let log = try XCTUnwrap(context.logger.formattedEntries.first)
-            XCTAssertTrue(log.contains("URL: https://example.com/items"))
-            XCTAssertTrue(log.contains("Method: PATCH"))
-            XCTAssertTrue(log.contains("Content-Type: application/json"))
-
             guard case let .started(_, request, _) = try XCTUnwrap(context.recorder.events.first) else {
                 return XCTFail("Expected a started transaction event")
             }
@@ -70,9 +65,14 @@ import XCTest
                 request.body.contents,
                 .bytes(Data("{\"name\":\"Windshield\"}".utf8))
             )
+            XCTAssertTrue(
+                request.headers.contains(
+                    WindshieldHeader(name: "Content-Type", value: "application/json")
+                )
+            )
         }
 
-        func testResponseAndPayloadAreForwardedIncrementallyAndLoggedOnCompletion() throws {
+        func testResponseAndPayloadAreForwardedIncrementallyAndRecordedOnCompletion() throws {
             let context = makeContext(request: request(url: "https://example.com/items"))
             context.protocolInstance.startLoading()
 
@@ -89,7 +89,6 @@ import XCTest
 
             XCTAssertEqual(context.client.eventNames, ["response", "data"])
             XCTAssertEqual(context.client.loadedData, firstChunk)
-            XCTAssertEqual(context.logger.formattedEntries.count, 1)
 
             context.transport.send(secondChunk)
             context.transport.complete()
@@ -97,19 +96,23 @@ import XCTest
             XCTAssertEqual(context.client.eventNames, ["response", "data", "data", "finish"])
             XCTAssertEqual(context.client.loadedData, firstChunk + secondChunk)
 
-            let responseLog = try XCTUnwrap(context.logger.formattedEntries.last)
-            XCTAssertTrue(responseLog.contains("Status: 201"))
-            XCTAssertTrue(responseLog.contains("Content-Type: application/json"))
-            XCTAssertTrue(responseLog.contains("{\"created\":true}"))
-
             XCTAssertEqual(context.recorder.events.count, 3)
+            guard case let .receivedResponse(_, recordedResponse) = context.recorder.events[1] else {
+                return XCTFail("Expected a received-response transaction event")
+            }
+            XCTAssertEqual(recordedResponse.statusCode, 201)
+            XCTAssertTrue(
+                recordedResponse.headers.contains(
+                    WindshieldHeader(name: "Content-Type", value: "application/json")
+                )
+            )
             guard case let .completed(_, body, _) = try XCTUnwrap(context.recorder.events.last) else {
                 return XCTFail("Expected a completed transaction event")
             }
             XCTAssertEqual(body.contents, .bytes(firstChunk + secondChunk))
         }
 
-        func testTransportFailureIsForwardedAndLoggedExactlyOnce() throws {
+        func testTransportFailureIsForwardedAndRecordedExactlyOnce() throws {
             let context = makeContext(request: request(url: "https://example.com/items"))
             context.protocolInstance.startLoading()
 
@@ -119,11 +122,6 @@ import XCTest
 
             XCTAssertEqual(context.client.eventNames, ["failure"])
             XCTAssertEqual((context.client.error as? URLError)?.code, .timedOut)
-            XCTAssertEqual(context.logger.formattedEntries.count, 2)
-            XCTAssertTrue(
-                try XCTUnwrap(context.logger.formattedEntries.last)
-                    .contains(error.localizedDescription)
-            )
             XCTAssertEqual(context.recorder.events.count, 2)
             guard case let .failed(_, _, failure, _) = try XCTUnwrap(context.recorder.events.last) else {
                 return XCTFail("Expected one failed transaction event")
@@ -142,7 +140,6 @@ import XCTest
 
             XCTAssertEqual(context.transport.task.cancelCallCount, 1)
             XCTAssertTrue(context.client.eventNames.isEmpty)
-            XCTAssertEqual(context.logger.formattedEntries.count, 1)
             XCTAssertEqual(context.recorder.events.count, 2)
             guard case .cancelled = try XCTUnwrap(context.recorder.events.last) else {
                 return XCTFail("Expected a cancelled transaction event")
@@ -220,10 +217,10 @@ import XCTest
                 )
             )
             XCTAssertEqual(context.client.eventNames, ["redirect"])
-            XCTAssertTrue(try XCTUnwrap(context.logger.formattedEntries.last).contains("Status: 302"))
-            guard case let .redirected(_, _, _, destination, _) = try XCTUnwrap(context.recorder.events.last) else {
+            guard case let .redirected(_, response, _, destination, _) = try XCTUnwrap(context.recorder.events.last) else {
                 return XCTFail("Expected a redirected transaction event")
             }
+            XCTAssertEqual(response.statusCode, 302)
             XCTAssertEqual(destination?.absoluteString, "https://example.com/new")
         }
 
@@ -241,14 +238,6 @@ import XCTest
 
             XCTAssertEqual(context.client.loadedData, payload)
 
-            let responseLog = try XCTUnwrap(context.logger.formattedEntries.last)
-            XCTAssertTrue(
-                responseLog.contains(
-                    "Captured \(WindshieldURLProtocol.maximumCapturedResponseBodySize) "
-                        + "of \(payload.count) bytes"
-                )
-            )
-            XCTAssertTrue(responseLog.contains("[truncated]"))
             guard case let .completed(_, body, _) = try XCTUnwrap(context.recorder.events.last) else {
                 return XCTFail("Expected a completed transaction event")
             }
@@ -397,7 +386,6 @@ import XCTest
         private func makeContext(request: URLRequest) -> TestContext {
             let client = URLProtocolClientSpy()
             let transport = WindshieldTransportSpy()
-            let logger = WindshieldLoggerSpy()
             let recorder = WindshieldRecorderSpy()
             let protocolInstance = WindshieldURLProtocol(
                 request: request,
@@ -405,14 +393,12 @@ import XCTest
                 client: client
             )
             protocolInstance.transport = transport
-            protocolInstance.logger = logger
             protocolInstance.recorder = recorder
 
             return TestContext(
                 protocolInstance: protocolInstance,
                 client: client,
                 transport: transport,
-                logger: logger,
                 recorder: recorder
             )
         }
@@ -460,7 +446,6 @@ import XCTest
         let protocolInstance: WindshieldURLProtocol
         let client: URLProtocolClientSpy
         let transport: WindshieldTransportSpy
-        let logger: WindshieldLoggerSpy
         let recorder: WindshieldRecorderSpy
     }
 
@@ -512,18 +497,6 @@ import XCTest
 
         func cancel() {
             cancelCallCount += 1
-        }
-    }
-
-    private final class WindshieldLoggerSpy: WindshieldLogging {
-        private(set) var entries: [WindshieldLogEntry] = []
-
-        var formattedEntries: [String] {
-            entries.map(WindshieldLogFormatter.format)
-        }
-
-        func log(_ entry: WindshieldLogEntry) {
-            entries.append(entry)
         }
     }
 
