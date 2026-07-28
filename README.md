@@ -21,7 +21,7 @@ For a tagged release, a package manifest can use:
 
 ```swift
 .package(
-    url: "https://github.com/your-account/Windshield.git",
+    url: "https://github.com/initishbhatt/Windshield.git",
     from: "0.1.0"
 )
 ```
@@ -30,7 +30,7 @@ During early development, you can point at `main` instead:
 
 ```swift
 .package(
-    url: "https://github.com/your-account/Windshield.git",
+    url: "https://github.com/initishbhatt/Windshield.git",
     branch: "main"
 )
 ```
@@ -139,7 +139,7 @@ Windshield is designed for debug diagnostics, not production monitoring.
 - Global registration is best effort. Prefer `start(intercepting:)` when you own the configuration.
 - The forwarding session cannot reproduce every originating session policy. Apps using custom proxies, cookie stores, custom protocol chains, or connection-level behavior should validate their integration.
 - Streamed request bodies are reported but not read.
-- Captured headers and payloads may contain credentials or personal data. Never enable Windshield in production.
+- Captured URLs, query strings, headers, and payloads may contain credentials or personal data. Never enable Windshield in production.
 
 ## Try the demo
 
@@ -152,7 +152,6 @@ swift test
 swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
 xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' build
 ```
-
 
 ## Project status
 
