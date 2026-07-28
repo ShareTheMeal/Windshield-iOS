@@ -137,7 +137,8 @@ Windshield is designed for debug diagnostics, not production monitoring.
 - `WKWebView`, Network.framework, and other transports outside URL Loading System are not captured.
 - Existing sessions cannot be modified after initialization.
 - Global registration is best effort. Prefer `start(intercepting:)` when you own the configuration.
-- The forwarding session cannot reproduce every originating session policy. Apps using custom proxies, cookie stores, custom protocol chains, or connection-level behavior should validate their integration.
+- The forwarding session cannot reproduce every originating session policy. Apps using custom proxies, cookie stores, or custom protocol chains should validate their integration.
+- Authentication delegates, client certificates, certificate pinning, and custom server-trust decisions from the originating session are not forwarded. Windshield uses Foundation's default challenge handling. Preemptive `Authorization` headers are preserved. Do not intercept sessions that depend on custom authentication or trust callbacks.
 - Streamed request bodies are reported but not read.
 - Captured URLs, query strings, headers, and payloads may contain credentials or personal data. Never enable Windshield in production.
 

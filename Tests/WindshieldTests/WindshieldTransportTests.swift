@@ -101,6 +101,146 @@ import XCTest
             await recorder.flush()
         }
 
+        func testConfiguredInterceptorCompletesChallengeWithDefaultHandling() async throws {
+            let recorder = WindshieldTransactionRecorder.shared
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+
+            let responseBody = Data("authenticated".utf8)
+            let server = try TransportLoopbackServer(
+                routes: [
+                    "/private": .basicAuthentication(
+                        username: "developer",
+                        password: "windshield",
+                        body: responseBody
+                    ),
+                ]
+            )
+            let port = try server.start()
+            defer { server.stop() }
+
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [WindshieldURLProtocol.self]
+            configuration.urlCredentialStorage = nil
+            configuration.timeoutIntervalForRequest = 5
+            let delegate = HTTPBasicAuthenticationDelegate(
+                username: "developer",
+                password: "windshield"
+            )
+            let session = URLSession(
+                configuration: configuration,
+                delegate: delegate,
+                delegateQueue: nil
+            )
+            defer { session.invalidateAndCancel() }
+
+            let (receivedData, receivedResponse) = try await session.data(
+                for: request(port: port, path: "/private")
+            )
+
+            XCTAssertEqual(receivedData, Data())
+            let httpResponse = try XCTUnwrap(receivedResponse as? HTTPURLResponse)
+            XCTAssertEqual(httpResponse.statusCode, 401)
+            XCTAssertEqual(
+                httpResponse.value(forHTTPHeaderField: "WWW-Authenticate"),
+                #"Basic realm="Windshield""#
+            )
+            XCTAssertFalse(server.requestTargets.isEmpty)
+            XCTAssertTrue(server.requestTargets.allSatisfy { $0 == "/private" })
+            XCTAssertEqual(
+                server.authenticationResults.count,
+                server.requestTargets.count
+            )
+            XCTAssertTrue(server.authenticationResults.allSatisfy { !$0 })
+            XCTAssertEqual(delegate.challengeCount, 0)
+            XCTAssertTrue(delegate.authenticationMethods.isEmpty)
+
+            await recorder.flush()
+            let transactions = await MainActor.run {
+                WindshieldStore.shared.transactions
+            }
+            XCTAssertEqual(transactions.count, 1)
+            XCTAssertEqual(transactions.first?.state, .completed)
+            XCTAssertEqual(transactions.first?.response?.statusCode, 401)
+            XCTAssertEqual(transactions.first?.response?.body?.contents, .bytes(Data()))
+            XCTAssertTrue(
+                transactions.first?.response?.headers.contains {
+                    $0.name.caseInsensitiveCompare("WWW-Authenticate") == .orderedSame
+                        && $0.value == #"Basic realm="Windshield""#
+                } == true
+            )
+
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+        }
+
+        func testConfiguredInterceptorPreservesPreemptiveAuthorization() async throws {
+            let recorder = WindshieldTransactionRecorder.shared
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+
+            let username = "developer"
+            let password = "windshield"
+            let responseBody = Data("authenticated".utf8)
+            let server = try TransportLoopbackServer(
+                routes: [
+                    "/private": .basicAuthentication(
+                        username: username,
+                        password: password,
+                        body: responseBody
+                    ),
+                ]
+            )
+            let port = try server.start()
+            defer { server.stop() }
+
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [WindshieldURLProtocol.self]
+            let session = URLSession(configuration: configuration)
+            defer { session.invalidateAndCancel() }
+
+            let credentials = Data("\(username):\(password)".utf8).base64EncodedString()
+            var authenticatedRequest = request(port: port, path: "/private")
+            authenticatedRequest.setValue(
+                "Basic \(credentials)",
+                forHTTPHeaderField: "Authorization"
+            )
+
+            let (receivedData, receivedResponse) = try await session.data(
+                for: authenticatedRequest
+            )
+            XCTAssertEqual(receivedData, responseBody)
+            XCTAssertEqual((receivedResponse as? HTTPURLResponse)?.statusCode, 200)
+            XCTAssertEqual(server.requestTargets, ["/private"])
+            XCTAssertEqual(server.authenticationResults, [true])
+
+            await recorder.flush()
+            let transactions = await MainActor.run {
+                WindshieldStore.shared.transactions
+            }
+            XCTAssertEqual(transactions.count, 1)
+            XCTAssertEqual(transactions.first?.state, .completed)
+            XCTAssertEqual(transactions.first?.response?.statusCode, 200)
+            XCTAssertEqual(transactions.first?.response?.body?.contents, .bytes(responseBody))
+            XCTAssertTrue(
+                transactions.first?.request.headers.contains {
+                    $0.name.caseInsensitiveCompare("Authorization") == .orderedSame
+                        && $0.value == "Basic \(credentials)"
+                } == true
+            )
+
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+        }
+
         func testProductionTransportReportsAConnectionFailure() throws {
             let server = try TransportLoopbackServer(
                 routes: ["/failure": .closeConnection]
@@ -247,14 +387,6 @@ import XCTest
             redirectExpectation?.fulfill()
         }
 
-        func transportDidReceive(
-            _: URLAuthenticationChallenge,
-            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
-        ) {
-            record("challenge")
-            completionHandler(.performDefaultHandling, nil)
-        }
-
         private func record(_ event: String) {
             lock.withLock {
                 events.append(event)
@@ -267,6 +399,7 @@ import XCTest
         enum Route {
             case response(body: Data)
             case redirect(location: String)
+            case basicAuthentication(username: String, password: String, body: Data)
             case closeConnection
             case holdConnection
         }
@@ -286,15 +419,25 @@ import XCTest
         private let lock = NSLock()
         private let requestSignal = DispatchSemaphore(value: 0)
         private var recordedRequestTargets: [String] = []
+        private var recordedAuthenticationResults: [Bool] = []
         private var connections: [NWConnection] = []
 
         init(routes: [String: Route]) throws {
             self.routes = routes
-            listener = try NWListener(using: .tcp, on: .any)
+            let parameters = NWParameters.tcp
+            parameters.requiredLocalEndpoint = .hostPort(
+                host: NWEndpoint.Host("127.0.0.1"),
+                port: .any
+            )
+            listener = try NWListener(using: parameters)
         }
 
         var requestTargets: [String] {
             lock.withLock { recordedRequestTargets }
+        }
+
+        var authenticationResults: [Bool] {
+            lock.withLock { recordedAuthenticationResults }
         }
 
         func start() throws -> NWEndpoint.Port {
@@ -405,6 +548,29 @@ import XCTest
                     on: connection
                 )
 
+            case let .basicAuthentication(username, password, body):
+                let credentials = Data("\(username):\(password)".utf8).base64EncodedString()
+                let isAuthenticated = Self.header(named: "Authorization", from: requestData)
+                    == "Basic \(credentials)"
+                lock.withLock {
+                    recordedAuthenticationResults.append(isAuthenticated)
+                }
+                if isAuthenticated {
+                    send(
+                        status: "200 OK",
+                        headers: ["Content-Type: text/plain"],
+                        body: body,
+                        on: connection
+                    )
+                } else {
+                    send(
+                        status: "401 Unauthorized",
+                        headers: [#"WWW-Authenticate: Basic realm="Windshield""#],
+                        body: Data(),
+                        on: connection
+                    )
+                }
+
             case .closeConnection:
                 connection.cancel()
 
@@ -449,6 +615,16 @@ import XCTest
                 .map(String.init) ?? ""
         }
 
+        private static func header(named name: String, from data: Data) -> String? {
+            let prefix = "\(name.lowercased()):"
+            return String(decoding: data, as: UTF8.self)
+                .components(separatedBy: "\r\n")
+                .first { $0.lowercased().hasPrefix(prefix) }?
+                .split(separator: ":", maxSplits: 1)
+                .last?
+                .trimmingCharacters(in: .whitespaces)
+        }
+
         private static func hasCompleteRequest(_ data: Data) -> Bool {
             guard let headerRange = data.range(of: Data("\r\n\r\n".utf8)) else {
                 return false
@@ -475,6 +651,50 @@ import XCTest
                 to: headerRange.upperBound
             )
             return data.count >= headerByteCount + contentLength
+        }
+    }
+
+    private final class HTTPBasicAuthenticationDelegate: NSObject,
+        URLSessionTaskDelegate,
+        @unchecked Sendable
+    {
+        private let lock = NSLock()
+        private let username: String
+        private let password: String
+        private var recordedAuthenticationMethods: [String] = []
+
+        init(username: String, password: String) {
+            self.username = username
+            self.password = password
+        }
+
+        var challengeCount: Int {
+            lock.withLock { recordedAuthenticationMethods.count }
+        }
+
+        var authenticationMethods: [String] {
+            lock.withLock { recordedAuthenticationMethods }
+        }
+
+        func urlSession(
+            _: URLSession,
+            task _: URLSessionTask,
+            didReceive challenge: URLAuthenticationChallenge,
+            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        ) {
+            lock.withLock {
+                recordedAuthenticationMethods.append(
+                    challenge.protectionSpace.authenticationMethod
+                )
+            }
+            completionHandler(
+                .useCredential,
+                URLCredential(
+                    user: username,
+                    password: password,
+                    persistence: .none
+                )
+            )
         }
     }
 

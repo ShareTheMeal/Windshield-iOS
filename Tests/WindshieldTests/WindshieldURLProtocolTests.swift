@@ -562,229 +562,6 @@ import XCTest
             XCTAssertTrue(body.isTruncated)
         }
 
-        func testAuthenticationChallengeDecisionIsForwardedToTheTransport() {
-            let context = makeContext(request: request(url: "https://example.com/private"))
-            context.protocolInstance.startLoading()
-
-            let credential = URLCredential(
-                user: "developer",
-                password: "secret",
-                persistence: .none
-            )
-            context.client.authenticationChallengeHandler = { challenge in
-                challenge.sender?.use(credential, for: challenge)
-            }
-
-            var receivedDisposition: URLSession.AuthChallengeDisposition?
-            var receivedCredential: URLCredential?
-            context.transport.send(authenticationChallenge()) { disposition, credential in
-                receivedDisposition = disposition
-                receivedCredential = credential
-            }
-
-            XCTAssertEqual(context.client.eventNames, ["challenge"])
-            XCTAssertEqual(receivedDisposition, .useCredential)
-            XCTAssertEqual(receivedCredential?.user, "developer")
-            XCTAssertEqual(receivedCredential?.password, "secret")
-        }
-
-        func testAuthenticationChallengeSenderForwardsEveryDispositionExactlyOnce() {
-            let cases: [(
-                action: (URLAuthenticationChallenge) -> Void,
-                expectedDisposition: URLSession.AuthChallengeDisposition
-            )] = [
-                (
-                    action: { challenge in
-                        challenge.sender?.continueWithoutCredential(for: challenge)
-                    },
-                    expectedDisposition: .useCredential
-                ),
-                (
-                    action: { challenge in
-                        challenge.sender?.performDefaultHandling?(for: challenge)
-                    },
-                    expectedDisposition: .performDefaultHandling
-                ),
-                (
-                    action: { challenge in
-                        challenge.sender?.rejectProtectionSpaceAndContinue?(with: challenge)
-                    },
-                    expectedDisposition: .rejectProtectionSpace
-                ),
-                (
-                    action: { challenge in
-                        challenge.sender?.cancel(challenge)
-                    },
-                    expectedDisposition: .cancelAuthenticationChallenge
-                ),
-            ]
-
-            for testCase in cases {
-                let context = makeContext(request: request(url: "https://example.com/private"))
-                context.protocolInstance.startLoading()
-                context.client.authenticationChallengeHandler = { challenge in
-                    testCase.action(challenge)
-                    challenge.sender?.cancel(challenge)
-                }
-                let completion = AuthenticationCompletionSpy()
-
-                context.transport.send(
-                    authenticationChallenge(),
-                    completionHandler: completion.complete
-                )
-
-                let result = completion.results
-                XCTAssertEqual(result.count, 1)
-                XCTAssertEqual(result.first?.disposition, testCase.expectedDisposition)
-                XCTAssertNil(result.first?.credential)
-            }
-        }
-
-        func testAuthenticationChallengeDefaultsWhenThereIsNoProtocolClient() {
-            let transport = WindshieldTransportSpy()
-            let recorder = WindshieldRecorderSpy()
-            let protocolInstance = WindshieldURLProtocol(
-                request: request(url: "https://example.com/private"),
-                cachedResponse: nil,
-                client: nil
-            )
-            protocolInstance.transport = transport
-            protocolInstance.recorder = recorder
-            protocolInstance.startLoading()
-            let completion = AuthenticationCompletionSpy()
-
-            transport.send(
-                authenticationChallenge(),
-                completionHandler: completion.complete
-            )
-
-            XCTAssertEqual(completion.results.count, 1)
-            XCTAssertEqual(completion.results.first?.disposition, .performDefaultHandling)
-            XCTAssertNil(completion.results.first?.credential)
-        }
-
-        func testStopLoadingIsReentrantFromAuthenticationClientCallback() throws {
-            let context = makeContext(request: request(url: "https://example.com/private"))
-            context.protocolInstance.startLoading()
-            context.client.authenticationChallengeHandler = { [weak protocolInstance = context.protocolInstance] _ in
-                protocolInstance?.stopLoading()
-            }
-            let completion = AuthenticationCompletionSpy()
-
-            context.transport.send(
-                authenticationChallenge(),
-                completionHandler: completion.complete
-            )
-
-            XCTAssertEqual(completion.results.count, 1)
-            XCTAssertEqual(
-                completion.results.first?.disposition,
-                .cancelAuthenticationChallenge
-            )
-            XCTAssertEqual(context.transport.task.cancelCallCount, 1)
-            XCTAssertEqual(context.recorder.events.count, 2)
-            guard case .cancelled = try XCTUnwrap(context.recorder.events.last) else {
-                return XCTFail("Expected one cancelled transaction event")
-            }
-        }
-
-        func testCredentialResolutionAndStopRaceCompletesChallengeExactlyOnce() throws {
-            let credential = URLCredential(
-                user: "developer",
-                password: "secret",
-                persistence: .none
-            )
-
-            for _ in 0 ..< 100 {
-                let context = makeContext(request: request(url: "https://example.com/private"))
-                context.protocolInstance.startLoading()
-                var forwardedChallenge: URLAuthenticationChallenge?
-                context.client.authenticationChallengeHandler = { challenge in
-                    forwardedChallenge = challenge
-                }
-                let completion = AuthenticationCompletionSpy()
-                context.transport.send(
-                    authenticationChallenge(),
-                    completionHandler: completion.complete
-                )
-                let challenge = try XCTUnwrap(forwardedChallenge)
-
-                let group = DispatchGroup()
-                group.enter()
-                DispatchQueue.global().async {
-                    challenge.sender?.use(credential, for: challenge)
-                    group.leave()
-                }
-                group.enter()
-                DispatchQueue.global().async {
-                    context.protocolInstance.stopLoading()
-                    group.leave()
-                }
-
-                XCTAssertEqual(group.wait(timeout: .now() + 1), .success)
-                let results = completion.results
-                XCTAssertEqual(results.count, 1)
-                guard let result = results.first else {
-                    return XCTFail("Expected one authentication result")
-                }
-                XCTAssertTrue(
-                    result.disposition == .useCredential
-                        || result.disposition == .cancelAuthenticationChallenge
-                )
-                if result.disposition == .useCredential {
-                    XCTAssertEqual(result.credential?.user, "developer")
-                } else {
-                    XCTAssertNil(result.credential)
-                }
-            }
-        }
-
-        func testStopLoadingCancelsAPendingAuthenticationChallenge() {
-            let context = makeContext(request: request(url: "https://example.com/private"))
-            context.protocolInstance.startLoading()
-
-            var receivedDisposition: URLSession.AuthChallengeDisposition?
-            context.transport.send(authenticationChallenge()) { disposition, _ in
-                receivedDisposition = disposition
-            }
-
-            context.protocolInstance.stopLoading()
-
-            XCTAssertEqual(receivedDisposition, .cancelAuthenticationChallenge)
-            XCTAssertEqual(context.transport.task.cancelCallCount, 1)
-        }
-
-        func testCompletionCancelsAPendingAuthenticationChallenge() {
-            let context = makeContext(request: request(url: "https://example.com/private"))
-            context.protocolInstance.startLoading()
-
-            var receivedDisposition: URLSession.AuthChallengeDisposition?
-            context.transport.send(authenticationChallenge()) { disposition, _ in
-                receivedDisposition = disposition
-            }
-
-            context.transport.complete()
-
-            XCTAssertEqual(receivedDisposition, .cancelAuthenticationChallenge)
-            XCTAssertEqual(context.client.eventNames, ["challenge", "finish"])
-            XCTAssertEqual(context.transport.task.cancelCallCount, 0)
-        }
-
-        func testChallengeAfterStopIsCancelledWithoutClientDelivery() {
-            let context = makeContext(request: request(url: "https://example.com/private"))
-            context.protocolInstance.startLoading()
-            context.protocolInstance.stopLoading()
-
-            var receivedDisposition: URLSession.AuthChallengeDisposition?
-            context.transport.send(authenticationChallenge()) { disposition, _ in
-                receivedDisposition = disposition
-            }
-
-            XCTAssertEqual(receivedDisposition, .cancelAuthenticationChallenge)
-            XCTAssertTrue(context.client.eventNames.isEmpty)
-            XCTAssertEqual(context.transport.task.cancelCallCount, 1)
-        }
-
         func testConfiguredSessionInterceptsARequestUsingTheProductionTransport() throws {
             let responseBody = Data("{\"source\":\"windshield\"}".utf8)
             let server = try LoopbackHTTPServer(responseBody: responseBody)
@@ -916,25 +693,6 @@ import XCTest
                 )
             )
         }
-
-        private func authenticationChallenge() -> URLAuthenticationChallenge {
-            let protectionSpace = URLProtectionSpace(
-                host: "example.com",
-                port: 443,
-                protocol: "https",
-                realm: "Windshield Tests",
-                authenticationMethod: NSURLAuthenticationMethodHTTPBasic
-            )
-
-            return URLAuthenticationChallenge(
-                protectionSpace: protectionSpace,
-                proposedCredential: nil,
-                previousFailureCount: 0,
-                failureResponse: nil,
-                error: nil,
-                sender: AuthenticationChallengeSenderStub()
-            )
-        }
     }
 
     private struct TestContext: @unchecked Sendable {
@@ -977,13 +735,6 @@ import XCTest
         func redirect(to request: URLRequest, response: HTTPURLResponse) {
             observer?.transportDidRedirect(to: request, response: response)
         }
-
-        func send(
-            _ challenge: URLAuthenticationChallenge,
-            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
-        ) {
-            observer?.transportDidReceive(challenge, completionHandler: completionHandler)
-        }
     }
 
     private final class WindshieldTransportTaskSpy: WindshieldTransportTask {
@@ -1009,43 +760,11 @@ import XCTest
         }
     }
 
-    private final class AuthenticationCompletionSpy: @unchecked Sendable {
-        struct Result {
-            let disposition: URLSession.AuthChallengeDisposition
-            let credential: URLCredential?
-        }
-
-        private let lock = NSLock()
-        private var storedResults: [Result] = []
-
-        var results: [Result] {
-            lock.lock()
-            let results = storedResults
-            lock.unlock()
-            return results
-        }
-
-        func complete(
-            disposition: URLSession.AuthChallengeDisposition,
-            credential: URLCredential?
-        ) {
-            lock.lock()
-            storedResults.append(
-                Result(
-                    disposition: disposition,
-                    credential: credential
-                )
-            )
-            lock.unlock()
-        }
-    }
-
     private final class URLProtocolClientSpy: NSObject, URLProtocolClient, @unchecked Sendable {
         private(set) var eventNames: [String] = []
         private(set) var loadedData = Data()
         private(set) var error: Error?
         private(set) var redirectedRequest: URLRequest?
-        var authenticationChallengeHandler: ((URLAuthenticationChallenge) -> Void)?
         var dataHandler: ((Data) -> Void)?
 
         func urlProtocol(
@@ -1087,26 +806,13 @@ import XCTest
 
         func urlProtocol(
             _: URLProtocol,
-            didReceive challenge: URLAuthenticationChallenge
-        ) {
-            eventNames.append("challenge")
-            authenticationChallengeHandler?(challenge)
-        }
+            didReceive _: URLAuthenticationChallenge
+        ) {}
 
         func urlProtocol(
             _: URLProtocol,
             didCancel _: URLAuthenticationChallenge
         ) {}
-    }
-
-    private final class AuthenticationChallengeSenderStub: NSObject,
-        URLAuthenticationChallengeSender
-    {
-        func use(_: URLCredential, for _: URLAuthenticationChallenge) {}
-
-        func continueWithoutCredential(for _: URLAuthenticationChallenge) {}
-
-        func cancel(_: URLAuthenticationChallenge) {}
     }
 
     private final class LoopbackHTTPServer: @unchecked Sendable {

@@ -6,10 +6,6 @@ import Foundation
         func transportDidReceive(_ data: Data)
         func transportDidComplete(with error: Error?)
         func transportDidRedirect(to request: URLRequest, response: HTTPURLResponse)
-        func transportDidReceive(
-            _ challenge: URLAuthenticationChallenge,
-            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
-        )
     }
 
     protocol WindshieldTransportTask: AnyObject {
@@ -26,7 +22,8 @@ import Foundation
 
     /// The observer map is protected by `lock`. URLSession delegate callbacks run on
     /// the single-operation delegate queue, and the shared session is immutable after
-    /// initialization.
+    /// initialization. Authentication challenges use the internal session's default
+    /// handling because URLProtocol does not expose the originating session delegate.
     final class WindshieldURLSessionTransport: NSObject,
         WindshieldTransporting,
         @unchecked Sendable
@@ -140,20 +137,6 @@ import Foundation
             let observer = removeObserver(for: task)
             observer?.transportDidRedirect(to: request, response: response)
             completionHandler(nil)
-        }
-
-        func urlSession(
-            _: URLSession,
-            task: URLSessionTask,
-            didReceive challenge: URLAuthenticationChallenge,
-            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
-        ) {
-            guard let observer = observer(for: task) else {
-                completionHandler(.cancelAuthenticationChallenge, nil)
-                return
-            }
-
-            observer.transportDidReceive(challenge, completionHandler: completionHandler)
         }
     }
 

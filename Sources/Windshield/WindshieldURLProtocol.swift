@@ -7,7 +7,8 @@ import Foundation
     /// Windshield is intended for development builds only. Custom protocols are not
     /// supported by background sessions. The protocol also cannot read every option
     /// from the originating URL session configuration, so apps with custom proxy,
-    /// cookie, or connection-level trust behavior should validate their integration.
+    /// cookie, authentication delegate, or connection-level trust behavior should
+    /// validate their integration.
     /// Foundation may move a URLProtocol instance across queues. All request lifecycle
     /// state is isolated by `lifecycle`. The injectable dependencies are set only by
     /// tests, before loading begins.
@@ -29,7 +30,6 @@ import Foundation
         private var capturedResponseBody = Data()
         private var receivedResponseBodyByteCount = 0
         private var transportTask: WindshieldTransportTask?
-        private var authenticationChallengeSender: WindshieldAuthenticationChallengeSender?
 
         var transport: WindshieldTransporting = WindshieldURLSessionTransport.shared
         var recorder: WindshieldRecording = WindshieldTransactionRecorder.shared
@@ -92,7 +92,6 @@ import Foundation
                 guard state != .terminated else {
                     return Cancellation(
                         task: nil,
-                        challengeSender: nil,
                         event: nil
                     )
                 }
@@ -102,7 +101,6 @@ import Foundation
 
                 let cancellation = Cancellation(
                     task: transportTask,
-                    challengeSender: authenticationChallengeSender,
                     event: shouldRecordCancellation
                         ? .cancelled(
                             id: transactionID,
@@ -112,7 +110,6 @@ import Foundation
                         : nil
                 )
                 transportTask = nil
-                authenticationChallengeSender = nil
                 capturedResponseBody.removeAll(keepingCapacity: false)
 
                 return cancellation
@@ -121,7 +118,6 @@ import Foundation
             if let event = cancellation.event {
                 recorder.record(event)
             }
-            cancellation.challengeSender?.cancel()
             cancellation.task?.cancel()
         }
 
@@ -132,7 +128,6 @@ import Foundation
 
         private struct Cancellation {
             let task: WindshieldTransportTask?
-            let challengeSender: WindshieldAuthenticationChallengeSender?
             let event: WindshieldTransactionEvent?
         }
 
@@ -159,11 +154,9 @@ import Foundation
         }
 
         private func completeBeforeTransportStarts(with error: Error) {
-            guard let termination = transitionToTerminated() else {
+            guard transitionToTerminated() else {
                 return
             }
-
-            termination.challengeSender?.cancel()
 
             recorder.record(
                 .failed(
@@ -176,20 +169,14 @@ import Foundation
             client?.urlProtocol(self, didFailWithError: error)
         }
 
-        private struct Termination {
-            let challengeSender: WindshieldAuthenticationChallengeSender?
-        }
-
-        private func transitionToTerminated() -> Termination? {
+        private func transitionToTerminated() -> Bool {
             guard state == .loading else {
-                return nil
+                return false
             }
 
             state = .terminated
-            let challengeSender = authenticationChallengeSender
             transportTask = nil
-            authenticationChallengeSender = nil
-            return Termination(challengeSender: challengeSender)
+            return true
         }
 
         private func capturedBodySnapshot() -> WindshieldBodyCapture {
@@ -242,11 +229,9 @@ import Foundation
 
         func transportDidComplete(with error: Error?) {
             lifecycle.sync {
-                guard let termination = transitionToTerminated() else {
+                guard transitionToTerminated() else {
                     return
                 }
-
-                termination.challengeSender?.cancel()
 
                 if let error {
                     recorder.record(
@@ -273,11 +258,9 @@ import Foundation
 
         func transportDidRedirect(to request: URLRequest, response: HTTPURLResponse) {
             lifecycle.sync {
-                guard let termination = transitionToTerminated() else {
+                guard transitionToTerminated() else {
                     return
                 }
-
-                termination.challengeSender?.cancel()
 
                 recorder.record(
                     .redirected(
@@ -295,34 +278,6 @@ import Foundation
                     wasRedirectedTo: redirectRequest,
                     redirectResponse: response
                 )
-            }
-        }
-
-        func transportDidReceive(
-            _ challenge: URLAuthenticationChallenge,
-            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
-        ) {
-            lifecycle.sync {
-                guard state == .loading else {
-                    completionHandler(.cancelAuthenticationChallenge, nil)
-                    return
-                }
-
-                let sender = WindshieldAuthenticationChallengeSender(
-                    completionHandler: completionHandler
-                )
-                authenticationChallengeSender = sender
-
-                guard let client else {
-                    sender.performDefaultHandling()
-                    return
-                }
-
-                let forwardedChallenge = URLAuthenticationChallenge(
-                    authenticationChallenge: challenge,
-                    sender: sender
-                )
-                client.urlProtocol(self, didReceive: forwardedChallenge)
             }
         }
     }
@@ -353,65 +308,6 @@ import Foundation
             }
 
             return try queue.sync(execute: operation)
-        }
-    }
-
-    /// The lock protects the one-shot completion handler across client and transport
-    /// callback queues.
-    private final class WindshieldAuthenticationChallengeSender: NSObject,
-        URLAuthenticationChallengeSender,
-        @unchecked Sendable
-    {
-        typealias CompletionHandler = (
-            URLSession.AuthChallengeDisposition,
-            URLCredential?
-        ) -> Void
-
-        private let lock = NSLock()
-        private var completionHandler: CompletionHandler?
-
-        init(completionHandler: @escaping CompletionHandler) {
-            self.completionHandler = completionHandler
-        }
-
-        func use(_ credential: URLCredential, for _: URLAuthenticationChallenge) {
-            resolve(with: .useCredential, credential: credential)
-        }
-
-        func continueWithoutCredential(for _: URLAuthenticationChallenge) {
-            resolve(with: .useCredential, credential: nil)
-        }
-
-        func cancel(_: URLAuthenticationChallenge) {
-            cancel()
-        }
-
-        func performDefaultHandling(for _: URLAuthenticationChallenge) {
-            performDefaultHandling()
-        }
-
-        func rejectProtectionSpaceAndContinue(with _: URLAuthenticationChallenge) {
-            resolve(with: .rejectProtectionSpace, credential: nil)
-        }
-
-        func cancel() {
-            resolve(with: .cancelAuthenticationChallenge, credential: nil)
-        }
-
-        func performDefaultHandling() {
-            resolve(with: .performDefaultHandling, credential: nil)
-        }
-
-        private func resolve(
-            with disposition: URLSession.AuthChallengeDisposition,
-            credential: URLCredential?
-        ) {
-            lock.lock()
-            let completionHandler = completionHandler
-            self.completionHandler = nil
-            lock.unlock()
-
-            completionHandler?(disposition, credential)
         }
     }
 #endif
