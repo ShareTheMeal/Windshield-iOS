@@ -264,6 +264,11 @@ import Foundation
             let revision: Int
         }
 
+        private struct PublicationWaiter {
+            let revision: Int
+            let continuation: CheckedContinuation<Void, Never>
+        }
+
         private let queue = DispatchQueue(
             label: "dev.windshield.transaction-recorder",
             qos: .utility
@@ -271,8 +276,10 @@ import Foundation
         private let publicationLock = NSLock()
         private var reducer = WindshieldTransactionReducer()
         private var revision = 0
+        private var publishedRevision = 0
         private var pendingPublication: Publication?
         private var isPublicationScheduled = false
+        private var publicationWaiters: [PublicationWaiter] = []
 
         private init() {}
 
@@ -311,11 +318,33 @@ import Foundation
 
         func flush() async {
             await withCheckedContinuation { continuation in
-                queue.async {
-                    DispatchQueue.main.async {
-                        continuation.resume()
-                    }
+                queue.async { [self] in
+                    waitForPublication(
+                        revision,
+                        continuation: continuation
+                    )
                 }
+            }
+        }
+
+        private func waitForPublication(
+            _ revision: Int,
+            continuation: CheckedContinuation<Void, Never>
+        ) {
+            publicationLock.lock()
+            let shouldResume = publishedRevision >= revision
+            if !shouldResume {
+                publicationWaiters.append(
+                    PublicationWaiter(
+                        revision: revision,
+                        continuation: continuation
+                    )
+                )
+            }
+            publicationLock.unlock()
+
+            if shouldResume {
+                continuation.resume()
             }
         }
 
@@ -360,11 +389,24 @@ import Foundation
             }
 
             publicationLock.lock()
+            if let publication {
+                publishedRevision = max(publishedRevision, publication.revision)
+            }
+            let readyWaiters = publicationWaiters.filter {
+                $0.revision <= publishedRevision
+            }
+            publicationWaiters.removeAll {
+                $0.revision <= publishedRevision
+            }
             let shouldReschedule = pendingPublication != nil
             if !shouldReschedule {
                 isPublicationScheduled = false
             }
             publicationLock.unlock()
+
+            for waiter in readyWaiters {
+                waiter.continuation.resume()
+            }
 
             if shouldReschedule {
                 schedulePublication()

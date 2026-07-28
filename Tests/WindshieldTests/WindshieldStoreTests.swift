@@ -209,6 +209,30 @@ import XCTest
             await recorder.flush()
         }
 
+        func testRecorderFlushPublishesTheLatestQueuedRevision() async {
+            let recorder = WindshieldTransactionRecorder.shared
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+
+            let ids = (0 ..< 20).map { _ in UUID() }
+            for id in ids {
+                recorder.record(.started(id: id, request: request(), at: Date()))
+            }
+            await recorder.flush()
+
+            let publishedIDs = await MainActor.run {
+                WindshieldStore.shared.transactions.map(\.id)
+            }
+            XCTAssertEqual(Set(publishedIDs), Set(ids))
+
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+        }
+
         private func request(body text: String = "") -> WindshieldRequestSnapshot {
             var request = URLRequest(url: URL(string: "https://example.com/items")!)
             request.httpMethod = "POST"
