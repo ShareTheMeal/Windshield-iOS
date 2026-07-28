@@ -26,7 +26,11 @@ import XCTest
             )
             let originalClasses = configuration.protocolClasses
             let registration = ProtocolRegistrationSpy()
-            let runtime = runtime(registration: registration)
+            let diagnostics = DiagnosticSpy()
+            let runtime = runtime(
+                registration: registration,
+                diagnostics: diagnostics
+            )
 
             runtime.start(intercepting: configuration, maximumTransactionCount: 10)
 
@@ -35,6 +39,10 @@ import XCTest
                 originalClasses?.map(ObjectIdentifier.init)
             )
             XCTAssertEqual(registration.callCount, 0)
+            XCTAssertEqual(
+                diagnostics.messages,
+                ["[Windshield] Background URL sessions cannot use custom URL protocols"]
+            )
         }
 
         func testTargetedStartDoesNotRegisterTheProtocolGlobally() {
@@ -46,6 +54,22 @@ import XCTest
 
             XCTAssertTrue(configuration.protocolClasses?.first == WindshieldURLProtocol.self)
             XCTAssertEqual(registration.callCount, 0)
+        }
+
+        func testSuccessfulTargetedStartEmitsNoConsoleDiagnostic() {
+            let registration = ProtocolRegistrationSpy()
+            let diagnostics = DiagnosticSpy()
+            let runtime = runtime(
+                registration: registration,
+                diagnostics: diagnostics
+            )
+
+            runtime.start(
+                intercepting: URLSessionConfiguration.ephemeral,
+                maximumTransactionCount: 10
+            )
+
+            XCTAssertTrue(diagnostics.messages.isEmpty)
         }
 
         func testGlobalStartRegistersOnlyOnceAfterSuccess() {
@@ -60,21 +84,144 @@ import XCTest
 
         func testGlobalStartRetriesAfterRegistrationFailure() {
             let registration = ProtocolRegistrationSpy(results: [false, true])
-            let runtime = runtime(registration: registration)
+            let diagnostics = DiagnosticSpy()
+            let runtime = runtime(
+                registration: registration,
+                diagnostics: diagnostics
+            )
 
             runtime.startGlobally(maximumTransactionCount: 10)
             runtime.startGlobally(maximumTransactionCount: 10)
 
             XCTAssertEqual(registration.callCount, 2)
+            XCTAssertEqual(
+                diagnostics.messages,
+                ["[Windshield] Global URLProtocol registration failed"]
+            )
+        }
+
+        func testConcurrentGlobalStartRegistersTheProtocolExactlyOnce() {
+            let registration = ProtocolRegistrationSpy()
+            let retention = RetentionLimitSpy()
+            let runtime = runtime(
+                registration: registration,
+                retention: retention
+            )
+
+            DispatchQueue.concurrentPerform(iterations: 64) { _ in
+                runtime.startGlobally(maximumTransactionCount: 25)
+            }
+
+            XCTAssertEqual(registration.callCount, 1)
+            XCTAssertEqual(retention.values.count, 64)
+            XCTAssertTrue(retention.values.allSatisfy { $0 == 25 })
+        }
+
+        func testConcurrentPublicTargetedStartInstrumentsIndependentConfigurations() async {
+            let instrumentation = InstrumentationResultSpy()
+
+            DispatchQueue.concurrentPerform(iterations: 64) { _ in
+                let configuration = URLSessionConfiguration.ephemeral
+                Windshield.start(
+                    intercepting: configuration,
+                    maximumTransactions: 25
+                )
+                instrumentation.record(
+                    configuration.protocolClasses?.first == WindshieldURLProtocol.self
+                )
+            }
+
+            XCTAssertEqual(instrumentation.results.count, 64)
+            XCTAssertTrue(instrumentation.results.allSatisfy { $0 })
+
+            let recorder = WindshieldTransactionRecorder.shared
+            await recorder.flush()
+            recorder.configure(
+                maximumTransactionCount: WindshieldRetentionPolicy.defaultMaximumTransactionCount
+            )
+            await recorder.flush()
+        }
+
+        func testTargetedStartForwardsInvalidRetentionLimitToThePolicyLayer() {
+            let registration = ProtocolRegistrationSpy()
+            let retention = RetentionLimitSpy()
+            let runtime = runtime(
+                registration: registration,
+                retention: retention
+            )
+
+            runtime.start(
+                intercepting: URLSessionConfiguration.ephemeral,
+                maximumTransactionCount: -10
+            )
+
+            XCTAssertEqual(retention.values, [-10])
         }
 
         private func runtime(
-            registration: ProtocolRegistrationSpy
+            registration: ProtocolRegistrationSpy,
+            retention: RetentionLimitSpy? = nil,
+            diagnostics: DiagnosticSpy? = nil
         ) -> WindshieldRuntime {
             WindshieldRuntime(
                 registerProtocol: { registration.register() },
-                applyRetentionLimit: { _ in }
+                applyRetentionLimit: { value in retention?.apply(value) },
+                emitDiagnostic: { message in diagnostics?.emit(message) }
             )
+        }
+    }
+
+    private final class DiagnosticSpy: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storedMessages: [String] = []
+
+        var messages: [String] {
+            lock.lock()
+            let messages = storedMessages
+            lock.unlock()
+            return messages
+        }
+
+        func emit(_ message: String) {
+            lock.lock()
+            storedMessages.append(message)
+            lock.unlock()
+        }
+    }
+
+    private final class RetentionLimitSpy: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storedValues: [Int] = []
+
+        var values: [Int] {
+            lock.lock()
+            let values = storedValues
+            lock.unlock()
+            return values
+        }
+
+        func apply(_ value: Int) {
+            lock.lock()
+            storedValues.append(value)
+            lock.unlock()
+        }
+    }
+
+    private final class InstrumentationResultSpy: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storedResults: [Bool] = []
+
+        var results: [Bool] {
+            lock.lock()
+            let results = storedResults
+            lock.unlock()
+            return results
+        }
+
+        func record(_ result: Bool) {
+            lock.lock()
+            storedResults.append(result)
+            lock.unlock()
         }
     }
 

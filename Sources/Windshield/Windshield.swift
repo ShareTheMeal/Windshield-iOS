@@ -39,6 +39,7 @@ import Foundation
         private let registrationLock = NSLock()
         private let registerProtocol: @Sendable () -> Bool
         private let applyRetentionLimit: @Sendable (Int) -> Void
+        private let emitDiagnostic: @Sendable (String) -> Void
         private var isGloballyRegistered = false
 
         init(
@@ -49,10 +50,14 @@ import Foundation
                 WindshieldTransactionRecorder.shared.configure(
                     maximumTransactionCount: maximumTransactionCount
                 )
+            },
+            emitDiagnostic: @escaping @Sendable (String) -> Void = { message in
+                print(message)
             }
         ) {
             self.registerProtocol = registerProtocol
             self.applyRetentionLimit = applyRetentionLimit
+            self.emitDiagnostic = emitDiagnostic
         }
 
         func startGlobally(maximumTransactionCount: Int) {
@@ -69,7 +74,7 @@ import Foundation
             registrationLock.unlock()
 
             if !registrationSucceeded {
-                print("[Windshield] Global URLProtocol registration failed")
+                emitDiagnostic("[Windshield] Global URLProtocol registration failed")
             }
         }
 
@@ -91,7 +96,9 @@ import Foundation
         @discardableResult
         private func instrument(_ configuration: URLSessionConfiguration) -> Bool {
             guard configuration.identifier == nil else {
-                print("[Windshield] Background URL sessions cannot use custom URL protocols")
+                emitDiagnostic(
+                    "[Windshield] Background URL sessions cannot use custom URL protocols"
+                )
                 return false
             }
 
