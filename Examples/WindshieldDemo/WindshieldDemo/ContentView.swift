@@ -7,6 +7,7 @@ import SwiftUI
 
 struct ContentView: View {
     let session: URLSession
+    let sampleURL: URL
 
     @State private var isInspectorPresented = false
     @State private var isLoading = false
@@ -36,7 +37,7 @@ struct ContentView: View {
                 } header: {
                     Text("Network")
                 } footer: {
-                    Text("The demo calls https://httpbin.org/get using an instrumented URLSession.")
+                    Text("The demo calls \(sampleURL.absoluteString) using an instrumented URLSession.")
                 }
 
                 #if DEBUG
@@ -61,11 +62,6 @@ struct ContentView: View {
 
     @MainActor
     private func sendSampleRequest() async {
-        guard let url = URL(string: "https://httpbin.org/get?source=windshield-demo") else {
-            result = "The sample URL is invalid."
-            return
-        }
-
         isLoading = true
         result = "Request in progress..."
 
@@ -74,7 +70,7 @@ struct ContentView: View {
         }
 
         do {
-            let (data, response) = try await session.data(from: url)
+            let (data, response) = try await session.data(from: sampleURL)
             let statusCode = (response as? HTTPURLResponse)?.statusCode
             let status = statusCode.map(String.init) ?? "unknown"
             result = "HTTP \(status), \(data.count) bytes received."

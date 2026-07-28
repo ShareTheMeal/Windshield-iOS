@@ -11,3 +11,9 @@ configuration, and provides two actions:
 
 The Windshield import, setup call, and inspector UI are excluded from Release
 builds with `#if DEBUG`.
+
+## UI smoke test
+
+The `WindshieldDemo` scheme includes an XCUITest that starts a loopback HTTP
+fixture, makes a request through Windshield, opens the inspector, and verifies
+the captured response body. The test does not use the public internet.
