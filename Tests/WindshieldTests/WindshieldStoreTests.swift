@@ -424,6 +424,42 @@ import XCTest
             await recorder.flush()
         }
 
+        func testConcurrentFlushesPublishTheLatestRevisionAndAllReturn() async {
+            let recorder = WindshieldTransactionRecorder.shared
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            recorder.configure(maximumTransactionCount: 16)
+            await recorder.flush()
+
+            let ids = (0 ..< 16).map { _ in UUID() }
+            for id in ids {
+                recorder.record(.started(id: id, request: request(), at: Date()))
+            }
+
+            await withTaskGroup(of: Void.self) { group in
+                for _ in 0 ..< 16 {
+                    group.addTask {
+                        await recorder.flush()
+                    }
+                }
+                await group.waitForAll()
+            }
+
+            let retainedIDs = await MainActor.run {
+                Set(WindshieldStore.shared.transactions.map(\.id))
+            }
+            XCTAssertEqual(retainedIDs, Set(ids))
+
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            recorder.configure(
+                maximumTransactionCount: WindshieldRetentionPolicy.defaultMaximumTransactionCount
+            )
+            await recorder.flush()
+        }
+
         private func request(body text: String = "") -> WindshieldRequestSnapshot {
             var request = URLRequest(url: URL(string: "https://example.com/items")!)
             request.httpMethod = "POST"

@@ -266,24 +266,27 @@ import Foundation
             let revision: Int
         }
 
-        private struct PublicationWaiter {
-            let revision: Int
-            let continuation: CheckedContinuation<Void, Never>
-        }
-
         private let queue = DispatchQueue(
             label: "dev.windshield.transaction-recorder",
             qos: .utility
         )
         private let publicationLock = NSLock()
+        private let publicationSource: DispatchSourceUserDataAdd
         private var reducer = WindshieldTransactionReducer()
         private var revision = 0
-        private var publishedRevision = 0
         private var pendingPublication: Publication?
-        private var isPublicationScheduled = false
-        private var publicationWaiters: [PublicationWaiter] = []
 
-        private init() {}
+        private init() {
+            let source = DispatchSource.makeUserDataAddSource(queue: .main)
+            publicationSource = source
+            source.setEventHandler { [weak self] in
+                dispatchPrecondition(condition: .onQueue(.main))
+                MainActor.assumeIsolated {
+                    self?.publishPendingSnapshotOnMainActor()
+                }
+            }
+            source.activate()
+        }
 
         func record(_ event: WindshieldTransactionEvent) {
             queue.async { [self] in
@@ -321,32 +324,18 @@ import Foundation
         func flush() async {
             await withCheckedContinuation { continuation in
                 queue.async { [self] in
-                    waitForPublication(
-                        revision,
-                        continuation: continuation
+                    let publication = Publication(
+                        transactions: reducer.transactions,
+                        revision: revision
                     )
+
+                    // Publish directly so flush does not depend on dispatch source timing.
+                    DispatchQueue.main.async { [self] in
+                        discardPendingPublication(upTo: publication.revision)
+                        publish(publication)
+                        continuation.resume()
+                    }
                 }
-            }
-        }
-
-        private func waitForPublication(
-            _ revision: Int,
-            continuation: CheckedContinuation<Void, Never>
-        ) {
-            publicationLock.lock()
-            let shouldResume = publishedRevision >= revision
-            if !shouldResume {
-                publicationWaiters.append(
-                    PublicationWaiter(
-                        revision: revision,
-                        continuation: continuation
-                    )
-                )
-            }
-            publicationLock.unlock()
-
-            if shouldResume {
-                continuation.resume()
             }
         }
 
@@ -359,60 +348,40 @@ import Foundation
 
             publicationLock.lock()
             pendingPublication = publication
-            let shouldSchedule = !isPublicationScheduled
-            isPublicationScheduled = true
             publicationLock.unlock()
 
-            guard shouldSchedule else {
-                return
-            }
-
-            schedulePublication()
-        }
-
-        private func schedulePublication() {
-            DispatchQueue.main.async { [self] in
-                publishLatestSnapshotOnMainActor()
-            }
+            // The source data is only a wake signal. The lock holds the latest snapshot.
+            publicationSource.add(data: 1)
         }
 
         @MainActor
-        private func publishLatestSnapshotOnMainActor() {
+        private func publishPendingSnapshotOnMainActor() {
             publicationLock.lock()
             let publication = pendingPublication
             pendingPublication = nil
             publicationLock.unlock()
 
             if let publication {
-                WindshieldStore.shared.publish(
-                    transactions: publication.transactions,
-                    revision: publication.revision
-                )
+                publish(publication)
             }
+        }
 
+        private func discardPendingPublication(upTo revision: Int) {
             publicationLock.lock()
-            if let publication {
-                publishedRevision = max(publishedRevision, publication.revision)
-            }
-            let readyWaiters = publicationWaiters.filter {
-                $0.revision <= publishedRevision
-            }
-            publicationWaiters.removeAll {
-                $0.revision <= publishedRevision
-            }
-            let shouldReschedule = pendingPublication != nil
-            if !shouldReschedule {
-                isPublicationScheduled = false
+            if let pendingPublication,
+               pendingPublication.revision <= revision
+            {
+                self.pendingPublication = nil
             }
             publicationLock.unlock()
+        }
 
-            for waiter in readyWaiters {
-                waiter.continuation.resume()
-            }
-
-            if shouldReschedule {
-                schedulePublication()
-            }
+        @MainActor
+        private func publish(_ publication: Publication) {
+            WindshieldStore.shared.publish(
+                transactions: publication.transactions,
+                revision: publication.revision
+            )
         }
     }
 #endif
