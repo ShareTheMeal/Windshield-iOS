@@ -26,7 +26,7 @@ import Foundation
         private var authenticationChallengeSender: WindshieldAuthenticationChallengeSender?
 
         var transport: WindshieldTransporting = WindshieldURLSessionTransport.shared
-        var logger: WindshieldLogging = WindshieldConsoleLogger.shared
+        var logger: WindshieldLogging = WindshieldDisabledLogger.shared
         var recorder: WindshieldRecording = WindshieldTransactionRecorder.shared
 
         override class func canInit(with request: URLRequest) -> Bool {

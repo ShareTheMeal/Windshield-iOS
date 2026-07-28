@@ -2,7 +2,7 @@
 
 Windshield is a development-only HTTP inspector for iOS. It captures `URLSession` traffic with `URLProtocol` and gives your debug build a native SwiftUI traffic viewer, directly on the device.
 
-The current release keeps all traffic in memory. Nothing is persisted or sent anywhere.
+Windshield keeps captured traffic in memory. It does not persist, upload, or print request data to the console.
 
 ## Requirements
 

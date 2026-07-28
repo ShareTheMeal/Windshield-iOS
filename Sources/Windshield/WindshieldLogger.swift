@@ -17,21 +17,12 @@ import Foundation
         func log(_ entry: WindshieldLogEntry)
     }
 
-    final class WindshieldConsoleLogger: WindshieldLogging, @unchecked Sendable {
-        static let shared = WindshieldConsoleLogger()
-
-        private let queue = DispatchQueue(
-            label: "dev.windshield.console-logger",
-            qos: .utility
-        )
+    final class WindshieldDisabledLogger: WindshieldLogging, @unchecked Sendable {
+        static let shared = WindshieldDisabledLogger()
 
         private init() {}
 
-        func log(_ entry: WindshieldLogEntry) {
-            queue.async {
-                print(WindshieldLogFormatter.format(entry))
-            }
-        }
+        func log(_: WindshieldLogEntry) {}
     }
 
     enum WindshieldLogFormatter {
