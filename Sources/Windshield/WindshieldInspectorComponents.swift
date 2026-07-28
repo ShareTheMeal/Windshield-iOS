@@ -56,7 +56,7 @@
                         Text(filter.rawValue)
                             .font(.subheadline.weight(.medium))
                             .frame(maxWidth: .infinity)
-                            .frame(minHeight: 32)
+                            .frame(minHeight: 44)
                             .foregroundColor(selection == filter ? .white : .primary)
                             .background(
                                 Capsule()
@@ -149,13 +149,23 @@
         let transaction: WindshieldTransaction
 
         var body: some View {
-            Text(transaction.statusText)
-                .font(.caption2.weight(.semibold))
-                .monospacedDigit()
-                .foregroundColor(statusColor)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(statusColor.opacity(0.12), in: Capsule())
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 6, height: 6)
+                    .accessibilityHidden(true)
+                Text(transaction.statusText)
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundColor(.primary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(Color(.secondarySystemBackground), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(statusColor.opacity(0.65), lineWidth: 1)
+            )
         }
 
         private var statusColor: Color {

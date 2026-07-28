@@ -92,6 +92,16 @@ import XCTest
             XCTAssertTrue(result.contains("Showing the first 4 bytes"))
         }
 
+        func testBodyFormatterCompletesACharacterSplitByTheDisplayLimit() {
+            let body = capture("abc🙂tail")
+
+            let result = WindshieldBodyFormatter.format(body, displayByteLimit: 5)
+
+            XCTAssertTrue(result.hasPrefix("abc🙂"))
+            XCTAssertFalse(result.contains("Binary body"))
+            XCTAssertTrue(result.contains("Showing the first 7 bytes"))
+        }
+
         func testHeaderFormatterPreservesTheSortedSnapshotOrder() {
             let headers = [
                 WindshieldHeader(name: "Accept", value: "application/json"),

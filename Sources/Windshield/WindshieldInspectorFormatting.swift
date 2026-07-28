@@ -123,7 +123,10 @@ import Foundation
                 return "No body."
             }
 
-            let displayedData = Data(data.prefix(displayByteLimit))
+            let displayedData = displayData(
+                from: data,
+                displayByteLimit: displayByteLimit
+            )
             let isDisplayLimited = displayedData.count < data.count
             let content = formattedContent(
                 displayedData,
@@ -150,6 +153,34 @@ import Foundation
             }
 
             return content + "\n\n[" + notices.joined(separator: " ") + "]"
+        }
+
+        private static func displayData(
+            from data: Data,
+            displayByteLimit: Int
+        ) -> Data {
+            let limitedData = Data(data.prefix(displayByteLimit))
+            guard limitedData.count < data.count,
+                  String(data: limitedData, encoding: .utf8) == nil
+            else {
+                return limitedData
+            }
+
+            let maximumExtension = min(3, data.count - limitedData.count)
+            guard maximumExtension > 0 else {
+                return limitedData
+            }
+
+            for additionalByteCount in 1 ... maximumExtension {
+                let candidate = Data(
+                    data.prefix(limitedData.count + additionalByteCount)
+                )
+                if String(data: candidate, encoding: .utf8) != nil {
+                    return candidate
+                }
+            }
+
+            return limitedData
         }
 
         private static func formattedContent(

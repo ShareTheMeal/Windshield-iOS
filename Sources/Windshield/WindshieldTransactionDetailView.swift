@@ -147,6 +147,8 @@
                         UIPasteboard.general.string = url
                     } label: {
                         Label("Copy URL", systemImage: "doc.on.doc")
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .font(.caption)
                     .accessibilityLabel("Copy request URL")
@@ -246,6 +248,8 @@
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                         .labelStyle(.titleAndIcon)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .disabled(!isEnabled)
                 .accessibilityLabel(copyLabel)
