@@ -281,7 +281,7 @@ import Foundation
             publicationSource = source
             source.setEventHandler { [weak self] in
                 dispatchPrecondition(condition: .onQueue(.main))
-                MainActor.assumeIsolated {
+                Task { @MainActor in
                     self?.publishPendingSnapshotOnMainActor()
                 }
             }
