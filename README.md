@@ -11,6 +11,8 @@ Windshield keeps captured traffic in memory. It does not persist, upload, or pri
 - Xcode 15 or later
 - A Debug build
 
+The interception core also builds on macOS 12 for package tests and tooling. The built-in inspector interface is available only on iOS.
+
 ## Add the package
 
 After this repository is available on GitHub, add its URL in Xcode under **File → Add Package Dependencies**.
@@ -37,7 +39,7 @@ Add `Windshield` to the application target. Keep setup and presentation code ins
 
 ## Start interception
 
-For a session your app creates, instrument its configuration before creating the session. This is the reliable integration path.
+For a session your app creates, instrument its configuration before creating the session. This is the reliable integration path. This form changes only the supplied configuration and does not register Windshield process-wide.
 
 ```swift
 #if DEBUG
@@ -72,6 +74,8 @@ Windshield retains up to 100 transactions by default. You can choose another lim
 Windshield.start(intercepting: configuration, maximumTransactions: 250)
 #endif
 ```
+
+Values below one are treated as one retained transaction.
 
 ## Present the inspector
 

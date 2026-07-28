@@ -330,6 +330,70 @@ import XCTest
             XCTAssertTrue(server.receivedRequest.contains("core"))
         }
 
+        func testPublicTargetedAPIRecordsACompleteTransactionInTheSharedStore() async throws {
+            let recorder = WindshieldTransactionRecorder.shared
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+
+            let responseBody = Data("{\"recorded\":true}".utf8)
+            let server = try LoopbackHTTPServer(responseBody: responseBody)
+            let port = try server.start()
+            defer { server.stop() }
+
+            let configuration = URLSessionConfiguration.ephemeral
+            Windshield.start(intercepting: configuration)
+            let session = URLSession(configuration: configuration)
+            defer { session.invalidateAndCancel() }
+
+            let requestBody = Data("{\"name\":\"Windshield\"}".utf8)
+            var outgoingRequest = request(
+                url: "http://127.0.0.1:\(port.rawValue)/public-api"
+            )
+            outgoingRequest.httpMethod = "POST"
+            outgoingRequest.httpBody = requestBody
+            outgoingRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            outgoingRequest.setValue("public-api", forHTTPHeaderField: "X-Windshield-Test")
+
+            let (receivedBody, receivedResponse) = try await session.data(for: outgoingRequest)
+            XCTAssertEqual(receivedBody, responseBody)
+            XCTAssertEqual((receivedResponse as? HTTPURLResponse)?.statusCode, 200)
+
+            await recorder.flush()
+            let transaction = await MainActor.run {
+                WindshieldStore.shared.transactions.first
+            }
+
+            XCTAssertEqual(transaction?.request.url, outgoingRequest.url)
+            XCTAssertEqual(transaction?.request.method, "POST")
+            XCTAssertEqual(
+                transaction?.request.body.contents,
+                .unavailable(.bodyStream)
+            )
+            XCTAssertEqual(transaction?.request.body.totalByteCount, requestBody.count)
+            XCTAssertTrue(
+                transaction?.request.headers.contains(
+                    WindshieldHeader(name: "X-Windshield-Test", value: "public-api")
+                ) == true
+            )
+            XCTAssertEqual(transaction?.response?.statusCode, 200)
+            XCTAssertEqual(transaction?.response?.body?.contents, .bytes(responseBody))
+            XCTAssertTrue(
+                transaction?.response?.headers.contains(
+                    WindshieldHeader(name: "X-Windshield-Response", value: "captured")
+                ) == true
+            )
+            XCTAssertEqual(transaction?.state, .completed)
+            XCTAssertTrue(server.receivedRequest.contains("POST /public-api"))
+            XCTAssertTrue(server.receivedRequest.contains("{\"name\":\"Windshield\"}"))
+
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+        }
+
         private func makeContext(request: URLRequest) -> TestContext {
             let client = URLProtocolClientSpy()
             let transport = WindshieldTransportSpy()
@@ -621,10 +685,10 @@ import XCTest
                 if let data {
                     requestLock.lock()
                     requestData.append(data)
-                    let hasCompleteHeaders = requestData.range(of: Data("\r\n\r\n".utf8)) != nil
+                    let hasCompleteRequest = Self.hasCompleteRequest(requestData)
                     requestLock.unlock()
 
-                    if hasCompleteHeaders {
+                    if hasCompleteRequest {
                         sendResponse(on: connection)
                         return
                     }
@@ -642,6 +706,7 @@ import XCTest
             let headers = """
             HTTP/1.1 200 OK\r
             Content-Type: application/json\r
+            X-Windshield-Response: captured\r
             Content-Length: \(responseBody.count)\r
             Connection: close\r
             \r
@@ -657,6 +722,30 @@ import XCTest
                     connection.cancel()
                 }
             )
+        }
+
+        private static func hasCompleteRequest(_ data: Data) -> Bool {
+            guard let headerRange = data.range(of: Data("\r\n\r\n".utf8)) else {
+                return false
+            }
+
+            let headers = String(
+                decoding: data[..<headerRange.lowerBound],
+                as: UTF8.self
+            )
+            let contentLength = headers
+                .components(separatedBy: "\r\n")
+                .first {
+                    $0.lowercased().hasPrefix("content-length:")
+                }
+                .flatMap {
+                    Int($0.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces) ?? "")
+                } ?? 0
+            let headerByteCount = data.distance(
+                from: data.startIndex,
+                to: headerRange.upperBound
+            )
+            return data.count >= headerByteCount + contentLength
         }
     }
 

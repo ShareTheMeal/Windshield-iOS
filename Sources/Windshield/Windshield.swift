@@ -11,7 +11,7 @@ import Foundation
         public static func start(
             maximumTransactions: Int = 100
         ) {
-            WindshieldRuntime.shared.start(
+            WindshieldRuntime.shared.startGlobally(
                 maximumTransactionCount: maximumTransactions
             )
         }
@@ -24,51 +24,82 @@ import Foundation
             intercepting configuration: URLSessionConfiguration,
             maximumTransactions: Int = 100
         ) {
-            WindshieldRuntime.shared.instrument(configuration)
             WindshieldRuntime.shared.start(
+                intercepting: configuration,
                 maximumTransactionCount: maximumTransactions
             )
         }
     }
 
-    private final class WindshieldRuntime: @unchecked Sendable {
+    /// Coordinates process-wide registration separately from targeted configuration
+    /// instrumentation. Mutable registration state is protected by `registrationLock`.
+    final class WindshieldRuntime: @unchecked Sendable {
         static let shared = WindshieldRuntime()
 
-        private let lock = NSLock()
-        private var isRegistered = false
+        private let registrationLock = NSLock()
+        private let registerProtocol: @Sendable () -> Bool
+        private let applyRetentionLimit: @Sendable (Int) -> Void
+        private var isGloballyRegistered = false
 
-        private init() {}
+        init(
+            registerProtocol: @escaping @Sendable () -> Bool = {
+                URLProtocol.registerClass(WindshieldURLProtocol.self)
+            },
+            applyRetentionLimit: @escaping @Sendable (Int) -> Void = { maximumTransactionCount in
+                WindshieldTransactionRecorder.shared.configure(
+                    maximumTransactionCount: maximumTransactionCount
+                )
+            }
+        ) {
+            self.registerProtocol = registerProtocol
+            self.applyRetentionLimit = applyRetentionLimit
+        }
 
-        func start(maximumTransactionCount: Int) {
-            WindshieldTransactionRecorder.shared.configure(
-                maximumTransactionCount: maximumTransactionCount
-            )
+        func startGlobally(maximumTransactionCount: Int) {
+            configureRetention(maximumTransactionCount: maximumTransactionCount)
 
-            lock.lock()
-            guard !isRegistered else {
-                lock.unlock()
+            registrationLock.lock()
+            guard !isGloballyRegistered else {
+                registrationLock.unlock()
                 return
             }
 
-            isRegistered = URLProtocol.registerClass(WindshieldURLProtocol.self)
-            let registrationSucceeded = isRegistered
-            lock.unlock()
+            let registrationSucceeded = registerProtocol()
+            isGloballyRegistered = registrationSucceeded
+            registrationLock.unlock()
 
             if !registrationSucceeded {
                 print("[Windshield] Global URLProtocol registration failed")
             }
         }
 
-        func instrument(_ configuration: URLSessionConfiguration) {
+        func start(
+            intercepting configuration: URLSessionConfiguration,
+            maximumTransactionCount: Int
+        ) {
+            guard instrument(configuration) else {
+                return
+            }
+
+            configureRetention(maximumTransactionCount: maximumTransactionCount)
+        }
+
+        private func configureRetention(maximumTransactionCount: Int) {
+            applyRetentionLimit(maximumTransactionCount)
+        }
+
+        @discardableResult
+        private func instrument(_ configuration: URLSessionConfiguration) -> Bool {
             guard configuration.identifier == nil else {
                 print("[Windshield] Background URL sessions cannot use custom URL protocols")
-                return
+                return false
             }
 
             let existingClasses = configuration.protocolClasses ?? []
             configuration.protocolClasses = [WindshieldURLProtocol.self] + existingClasses.filter {
                 ObjectIdentifier($0) != ObjectIdentifier(WindshieldURLProtocol.self)
             }
+            return true
         }
     }
 #endif
