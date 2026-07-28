@@ -149,7 +149,6 @@ swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
 xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' build
 ```
 
-The architecture and retention rules are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The Stitch design references are recorded in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Project status
 
