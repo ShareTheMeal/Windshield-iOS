@@ -139,6 +139,90 @@ import XCTest
             XCTAssertEqual(reducer.transactions.first?.request.body.capturedByteCount, 3)
         }
 
+        func testInvalidRetentionLimitsClampToSafeMinimums() {
+            let olderID = UUID()
+            let newerID = UUID()
+            let policy = WindshieldRetentionPolicy(
+                maximumTransactionCount: 0,
+                maximumTotalBodyByteCount: -1
+            )
+            var reducer = WindshieldTransactionReducer(policy: policy)
+
+            reducer.reduce(.started(id: olderID, request: request(body: "older"), at: Date()))
+            reducer.reduce(.started(id: newerID, request: request(body: "newer"), at: Date()))
+
+            XCTAssertEqual(policy.maximumTransactionCount, 1)
+            XCTAssertEqual(policy.maximumTotalBodyByteCount, 0)
+            XCTAssertEqual(reducer.transactions.map(\.id), [newerID])
+            XCTAssertEqual(
+                reducer.transactions.first?.request.body.contents,
+                .unavailable(.discardedByRetentionPolicy)
+            )
+        }
+
+        func testExactBodyBudgetBoundaryRetainsEveryPayload() {
+            let id = UUID()
+            let policy = WindshieldRetentionPolicy(
+                maximumTransactionCount: 10,
+                maximumTotalBodyByteCount: 8
+            )
+            var reducer = WindshieldTransactionReducer(policy: policy)
+
+            reducer.reduce(.started(id: id, request: request(body: "1234"), at: Date()))
+            reducer.reduce(.receivedResponse(id: id, response: response()))
+            reducer.reduce(.completed(id: id, body: body("5678"), at: Date()))
+
+            XCTAssertEqual(
+                reducer.transactions.first?.request.body.contents,
+                .bytes(Data("1234".utf8))
+            )
+            XCTAssertEqual(
+                reducer.transactions.first?.response?.body?.contents,
+                .bytes(Data("5678".utf8))
+            )
+        }
+
+        func testClearDropsAnActiveTransactionAndIgnoresItsRemainingLifecycle() {
+            let id = UUID()
+            var reducer = WindshieldTransactionReducer()
+
+            reducer.reduce(.started(id: id, request: request(), at: Date()))
+            XCTAssertTrue(reducer.clear())
+
+            XCTAssertFalse(reducer.reduce(.receivedResponse(id: id, response: response())))
+            XCTAssertFalse(reducer.reduce(.completed(id: id, body: body("late"), at: Date())))
+            XCTAssertFalse(
+                reducer.reduce(
+                    .failed(
+                        id: id,
+                        body: body("late"),
+                        failure: WindshieldFailure(error: URLError(.cancelled)),
+                        at: Date()
+                    )
+                )
+            )
+            XCTAssertTrue(reducer.transactions.isEmpty)
+        }
+
+        func testAllActiveRetentionOverflowRemovesTheOldestActiveTransaction() {
+            let oldestID = UUID()
+            let middleID = UUID()
+            let newestID = UUID()
+            var reducer = WindshieldTransactionReducer(
+                policy: WindshieldRetentionPolicy(maximumTransactionCount: 2)
+            )
+
+            reducer.reduce(.started(id: oldestID, request: request(), at: Date()))
+            reducer.reduce(.started(id: middleID, request: request(), at: Date()))
+            reducer.reduce(.started(id: newestID, request: request(), at: Date()))
+
+            XCTAssertEqual(reducer.transactions.map(\.id), [newestID, middleID])
+            XCTAssertFalse(
+                reducer.reduce(.completed(id: oldestID, body: body("late"), at: Date()))
+            )
+            XCTAssertTrue(reducer.transactions.allSatisfy { $0.state == .inFlight })
+        }
+
         func testClearAndDuplicateStartAreIdempotent() {
             let id = UUID()
             var reducer = WindshieldTransactionReducer()
@@ -230,6 +314,113 @@ import XCTest
             await MainActor.run {
                 WindshieldStore.shared.clear()
             }
+            await recorder.flush()
+        }
+
+        func testRecorderAppliesLiveRetentionReconfiguration() async {
+            let recorder = WindshieldTransactionRecorder.shared
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            recorder.configure(maximumTransactionCount: 4)
+            await recorder.flush()
+
+            let ids = (0 ..< 4).map { _ in UUID() }
+            for (index, id) in ids.enumerated() {
+                let startedAt = Date(timeIntervalSince1970: TimeInterval(index))
+                recorder.record(.started(id: id, request: request(), at: startedAt))
+                recorder.record(
+                    .completed(
+                        id: id,
+                        body: .capture(
+                            Data("response \(index)".utf8),
+                            maximumByteCount: 1024
+                        ),
+                        at: startedAt.addingTimeInterval(1)
+                    )
+                )
+            }
+            await recorder.flush()
+
+            recorder.configure(maximumTransactionCount: 2)
+            await recorder.flush()
+
+            let retainedIDs = await MainActor.run {
+                WindshieldStore.shared.transactions.map(\.id)
+            }
+            XCTAssertEqual(retainedIDs, [ids[3], ids[2]])
+
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            recorder.configure(
+                maximumTransactionCount: WindshieldRetentionPolicy.defaultMaximumTransactionCount
+            )
+            await recorder.flush()
+        }
+
+        func testRecorderHandlesConcurrentProducersWithoutLosingTransactions() async {
+            let recorder = WindshieldTransactionRecorder.shared
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            recorder.configure(maximumTransactionCount: 64)
+            await recorder.flush()
+
+            let ids = (0 ..< 64).map { _ in UUID() }
+            DispatchQueue.concurrentPerform(iterations: ids.count) { index in
+                let id = ids[index]
+                let startedAt = Date(timeIntervalSince1970: TimeInterval(index))
+                var urlRequest = URLRequest(
+                    url: URL(string: "https://example.com/items/\(index)")!
+                )
+                urlRequest.httpMethod = "POST"
+                urlRequest.httpBody = Data("request \(index)".utf8)
+                let request = WindshieldRequestSnapshot(
+                    request: urlRequest,
+                    maximumBodyByteCount: 1024
+                )
+                let response = WindshieldResponseSnapshot(
+                    response: HTTPURLResponse(
+                        url: urlRequest.url!,
+                        statusCode: 200,
+                        httpVersion: "HTTP/1.1",
+                        headerFields: ["Content-Type": "application/json"]
+                    )!
+                )
+
+                recorder.record(.started(id: id, request: request, at: startedAt))
+                recorder.record(.receivedResponse(id: id, response: response))
+                recorder.record(
+                    .completed(
+                        id: id,
+                        body: .capture(
+                            Data("response \(index)".utf8),
+                            maximumByteCount: 1024
+                        ),
+                        at: startedAt.addingTimeInterval(1)
+                    )
+                )
+            }
+            await recorder.flush()
+
+            let transactions = await MainActor.run {
+                WindshieldStore.shared.transactions
+            }
+            XCTAssertEqual(transactions.count, ids.count)
+            XCTAssertEqual(Set(transactions.map(\.id)), Set(ids))
+            XCTAssertTrue(transactions.allSatisfy { $0.state == .completed })
+            XCTAssertTrue(transactions.allSatisfy { $0.response?.statusCode == 200 })
+            XCTAssertTrue(
+                transactions.allSatisfy { ($0.response?.body?.capturedByteCount ?? 0) > 0 }
+            )
+
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            recorder.configure(
+                maximumTransactionCount: WindshieldRetentionPolicy.defaultMaximumTransactionCount
+            )
             await recorder.flush()
         }
 
