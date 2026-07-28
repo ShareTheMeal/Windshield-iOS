@@ -446,6 +446,97 @@ import XCTest
             }
         }
 
+        func testRedirectAndCompletionRaceProducesOneTerminalOutcome() throws {
+            let redirectResponse = try httpResponse(
+                url: "https://example.com/old",
+                statusCode: 302
+            )
+            let redirectRequest = request(url: "https://example.com/new")
+
+            for _ in 0 ..< 100 {
+                let context = makeContext(request: request(url: "https://example.com/old"))
+                context.protocolInstance.startLoading()
+
+                let group = DispatchGroup()
+                group.enter()
+                DispatchQueue.global().async {
+                    context.transport.redirect(
+                        to: redirectRequest,
+                        response: redirectResponse
+                    )
+                    group.leave()
+                }
+                group.enter()
+                DispatchQueue.global().async {
+                    context.transport.complete()
+                    group.leave()
+                }
+
+                XCTAssertEqual(group.wait(timeout: .now() + 1), .success)
+                XCTAssertEqual(context.recorder.events.count, 2)
+                XCTAssertEqual(context.transport.task.cancelCallCount, 0)
+                guard let terminalEvent = context.recorder.events.last else {
+                    return XCTFail("Expected one terminal transaction event")
+                }
+                switch terminalEvent {
+                case .redirected:
+                    XCTAssertEqual(context.client.eventNames, ["redirect"])
+
+                case .completed:
+                    XCTAssertEqual(context.client.eventNames, ["finish"])
+
+                default:
+                    XCTFail("Expected redirect or completion")
+                }
+            }
+        }
+
+        func testRedirectAndCancellationRaceProducesOneTerminalOutcome() throws {
+            let redirectResponse = try httpResponse(
+                url: "https://example.com/old",
+                statusCode: 302
+            )
+            let redirectRequest = request(url: "https://example.com/new")
+
+            for _ in 0 ..< 100 {
+                let context = makeContext(request: request(url: "https://example.com/old"))
+                context.protocolInstance.startLoading()
+
+                let group = DispatchGroup()
+                group.enter()
+                DispatchQueue.global().async {
+                    context.transport.redirect(
+                        to: redirectRequest,
+                        response: redirectResponse
+                    )
+                    group.leave()
+                }
+                group.enter()
+                DispatchQueue.global().async {
+                    context.protocolInstance.stopLoading()
+                    group.leave()
+                }
+
+                XCTAssertEqual(group.wait(timeout: .now() + 1), .success)
+                XCTAssertEqual(context.recorder.events.count, 2)
+                guard let terminalEvent = context.recorder.events.last else {
+                    return XCTFail("Expected one terminal transaction event")
+                }
+                switch terminalEvent {
+                case .redirected:
+                    XCTAssertEqual(context.client.eventNames, ["redirect"])
+                    XCTAssertEqual(context.transport.task.cancelCallCount, 0)
+
+                case .cancelled:
+                    XCTAssertTrue(context.client.eventNames.isEmpty)
+                    XCTAssertEqual(context.transport.task.cancelCallCount, 1)
+
+                default:
+                    XCTFail("Expected redirect or cancellation")
+                }
+            }
+        }
+
         func testCaptureLimitDoesNotLimitThePayloadForwardedToTheClient() throws {
             let context = makeContext(request: request(url: "https://example.com/large"))
             context.protocolInstance.startLoading()
@@ -495,6 +586,157 @@ import XCTest
             XCTAssertEqual(receivedDisposition, .useCredential)
             XCTAssertEqual(receivedCredential?.user, "developer")
             XCTAssertEqual(receivedCredential?.password, "secret")
+        }
+
+        func testAuthenticationChallengeSenderForwardsEveryDispositionExactlyOnce() {
+            let cases: [(
+                action: (URLAuthenticationChallenge) -> Void,
+                expectedDisposition: URLSession.AuthChallengeDisposition
+            )] = [
+                (
+                    action: { challenge in
+                        challenge.sender?.continueWithoutCredential(for: challenge)
+                    },
+                    expectedDisposition: .useCredential
+                ),
+                (
+                    action: { challenge in
+                        challenge.sender?.performDefaultHandling?(for: challenge)
+                    },
+                    expectedDisposition: .performDefaultHandling
+                ),
+                (
+                    action: { challenge in
+                        challenge.sender?.rejectProtectionSpaceAndContinue?(with: challenge)
+                    },
+                    expectedDisposition: .rejectProtectionSpace
+                ),
+                (
+                    action: { challenge in
+                        challenge.sender?.cancel(challenge)
+                    },
+                    expectedDisposition: .cancelAuthenticationChallenge
+                ),
+            ]
+
+            for testCase in cases {
+                let context = makeContext(request: request(url: "https://example.com/private"))
+                context.protocolInstance.startLoading()
+                context.client.authenticationChallengeHandler = { challenge in
+                    testCase.action(challenge)
+                    challenge.sender?.cancel(challenge)
+                }
+                let completion = AuthenticationCompletionSpy()
+
+                context.transport.send(
+                    authenticationChallenge(),
+                    completionHandler: completion.complete
+                )
+
+                let result = completion.results
+                XCTAssertEqual(result.count, 1)
+                XCTAssertEqual(result.first?.disposition, testCase.expectedDisposition)
+                XCTAssertNil(result.first?.credential)
+            }
+        }
+
+        func testAuthenticationChallengeDefaultsWhenThereIsNoProtocolClient() {
+            let transport = WindshieldTransportSpy()
+            let recorder = WindshieldRecorderSpy()
+            let protocolInstance = WindshieldURLProtocol(
+                request: request(url: "https://example.com/private"),
+                cachedResponse: nil,
+                client: nil
+            )
+            protocolInstance.transport = transport
+            protocolInstance.recorder = recorder
+            protocolInstance.startLoading()
+            let completion = AuthenticationCompletionSpy()
+
+            transport.send(
+                authenticationChallenge(),
+                completionHandler: completion.complete
+            )
+
+            XCTAssertEqual(completion.results.count, 1)
+            XCTAssertEqual(completion.results.first?.disposition, .performDefaultHandling)
+            XCTAssertNil(completion.results.first?.credential)
+        }
+
+        func testStopLoadingIsReentrantFromAuthenticationClientCallback() throws {
+            let context = makeContext(request: request(url: "https://example.com/private"))
+            context.protocolInstance.startLoading()
+            context.client.authenticationChallengeHandler = { [weak protocolInstance = context.protocolInstance] _ in
+                protocolInstance?.stopLoading()
+            }
+            let completion = AuthenticationCompletionSpy()
+
+            context.transport.send(
+                authenticationChallenge(),
+                completionHandler: completion.complete
+            )
+
+            XCTAssertEqual(completion.results.count, 1)
+            XCTAssertEqual(
+                completion.results.first?.disposition,
+                .cancelAuthenticationChallenge
+            )
+            XCTAssertEqual(context.transport.task.cancelCallCount, 1)
+            XCTAssertEqual(context.recorder.events.count, 2)
+            guard case .cancelled = try XCTUnwrap(context.recorder.events.last) else {
+                return XCTFail("Expected one cancelled transaction event")
+            }
+        }
+
+        func testCredentialResolutionAndStopRaceCompletesChallengeExactlyOnce() throws {
+            let credential = URLCredential(
+                user: "developer",
+                password: "secret",
+                persistence: .none
+            )
+
+            for _ in 0 ..< 100 {
+                let context = makeContext(request: request(url: "https://example.com/private"))
+                context.protocolInstance.startLoading()
+                var forwardedChallenge: URLAuthenticationChallenge?
+                context.client.authenticationChallengeHandler = { challenge in
+                    forwardedChallenge = challenge
+                }
+                let completion = AuthenticationCompletionSpy()
+                context.transport.send(
+                    authenticationChallenge(),
+                    completionHandler: completion.complete
+                )
+                let challenge = try XCTUnwrap(forwardedChallenge)
+
+                let group = DispatchGroup()
+                group.enter()
+                DispatchQueue.global().async {
+                    challenge.sender?.use(credential, for: challenge)
+                    group.leave()
+                }
+                group.enter()
+                DispatchQueue.global().async {
+                    context.protocolInstance.stopLoading()
+                    group.leave()
+                }
+
+                XCTAssertEqual(group.wait(timeout: .now() + 1), .success)
+                let results = completion.results
+                XCTAssertEqual(results.count, 1)
+                guard let result = results.first else {
+                    return XCTFail("Expected one authentication result")
+                }
+                XCTAssertTrue(
+                    result.disposition == .useCredential
+                        || result.disposition == .cancelAuthenticationChallenge
+                )
+                if result.disposition == .useCredential {
+                    XCTAssertEqual(result.credential?.user, "developer")
+                } else {
+                    XCTAssertNil(result.credential)
+                }
+            }
         }
 
         func testStopLoadingCancelsAPendingAuthenticationChallenge() {
@@ -764,6 +1006,37 @@ import XCTest
         func record(_ event: WindshieldTransactionEvent) {
             events.append(event)
             recordHandler?(event)
+        }
+    }
+
+    private final class AuthenticationCompletionSpy: @unchecked Sendable {
+        struct Result {
+            let disposition: URLSession.AuthChallengeDisposition
+            let credential: URLCredential?
+        }
+
+        private let lock = NSLock()
+        private var storedResults: [Result] = []
+
+        var results: [Result] {
+            lock.lock()
+            let results = storedResults
+            lock.unlock()
+            return results
+        }
+
+        func complete(
+            disposition: URLSession.AuthChallengeDisposition,
+            credential: URLCredential?
+        ) {
+            lock.lock()
+            storedResults.append(
+                Result(
+                    disposition: disposition,
+                    credential: credential
+                )
+            )
+            lock.unlock()
         }
     }
 
