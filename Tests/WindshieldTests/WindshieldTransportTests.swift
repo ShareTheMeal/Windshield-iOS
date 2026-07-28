@@ -70,6 +70,31 @@ import XCTest
             XCTAssertEqual((receivedResponse as? HTTPURLResponse)?.statusCode, 200)
             XCTAssertEqual(server.requestTargets, ["/start", "/middle", "/final"])
             await recorder.flush()
+
+            let transactions = await MainActor.run {
+                WindshieldStore.shared.transactions
+            }
+            XCTAssertEqual(transactions.count, 3)
+            XCTAssertEqual(
+                transactions.map { $0.request.url?.path },
+                ["/final", "/middle", "/start"]
+            )
+
+            let final = transactions.first { $0.request.url?.path == "/final" }
+            XCTAssertEqual(final?.state, .completed)
+            XCTAssertEqual(final?.response?.statusCode, 200)
+            XCTAssertEqual(final?.response?.body?.contents, .bytes(responseBody))
+            XCTAssertEqual(final?.response?.body?.totalByteCount, responseBody.count)
+
+            assertRedirect(
+                transactions.first { $0.request.url?.path == "/middle" },
+                destinationPath: "/final"
+            )
+            assertRedirect(
+                transactions.first { $0.request.url?.path == "/start" },
+                destinationPath: "/middle"
+            )
+
             await MainActor.run {
                 WindshieldStore.shared.clear()
             }
@@ -129,6 +154,31 @@ import XCTest
             URLRequest(
                 url: URL(string: "http://127.0.0.1:\(port.rawValue)\(path)")!
             )
+        }
+
+        private func assertRedirect(
+            _ transaction: WindshieldTransaction?,
+            destinationPath: String,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            guard let transaction else {
+                XCTFail("Expected a redirected transaction", file: file, line: line)
+                return
+            }
+            guard case let .redirected(destination) = transaction.state else {
+                XCTFail("Expected redirected state", file: file, line: line)
+                return
+            }
+
+            XCTAssertEqual(transaction.response?.statusCode, 302, file: file, line: line)
+            XCTAssertEqual(
+                transaction.response?.body?.contents,
+                .bytes(Data()),
+                file: file,
+                line: line
+            )
+            XCTAssertEqual(destination?.path, destinationPath, file: file, line: line)
         }
     }
 
