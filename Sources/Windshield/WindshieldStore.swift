@@ -231,7 +231,9 @@ import Foundation
         @Published private(set) var transactions: [WindshieldTransaction] = []
         private var latestRevision = 0
 
-        private init() {}
+        init(transactions: [WindshieldTransaction] = []) {
+            self.transactions = transactions
+        }
 
         func clear() {
             WindshieldTransactionRecorder.shared.clear()
