@@ -57,10 +57,18 @@
                             .font(.subheadline.weight(.medium))
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: 44)
-                            .foregroundColor(selection == filter ? .white : .primary)
+                            .foregroundColor(
+                                selection == filter
+                                    ? Color(.systemBackground)
+                                    : .primary
+                            )
                             .background(
                                 Capsule()
-                                    .fill(selection == filter ? Color.accentColor : Color(.tertiarySystemFill))
+                                    .fill(
+                                        selection == filter
+                                            ? Color.primary
+                                            : Color(.tertiarySystemFill)
+                                    )
                             )
                     }
                     .buttonStyle(.plain)
@@ -138,9 +146,16 @@
                 .font(.caption2.weight(.bold).monospaced())
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-                .foregroundColor(.accentColor)
+                .foregroundColor(.primary)
                 .frame(width: 52, height: 24)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .background(
+                    Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(.separator), lineWidth: 1)
+                )
                 .accessibilityLabel("Method \(method)")
         }
     }
