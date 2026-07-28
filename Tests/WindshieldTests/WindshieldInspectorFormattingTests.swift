@@ -104,6 +104,11 @@ import XCTest
             )
         }
 
+        func testDisplayFormatterUsesAReadableZeroByteLabel() {
+            XCTAssertEqual(WindshieldDisplayFormatter.byteCount(0), "0 bytes")
+            XCTAssertEqual(WindshieldDisplayFormatter.byteCount(-1), "0 bytes")
+        }
+
         private func matches(
             _ transaction: WindshieldTransaction,
             filter: WindshieldTrafficFilter = .all,

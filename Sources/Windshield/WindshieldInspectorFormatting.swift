@@ -195,8 +195,12 @@ import Foundation
         private static let posixLocale = Locale(identifier: "en_US_POSIX")
 
         static func byteCount(_ byteCount: Int) -> String {
-            ByteCountFormatter.string(
-                fromByteCount: Int64(max(0, byteCount)),
+            guard byteCount > 0 else {
+                return "0 bytes"
+            }
+
+            return ByteCountFormatter.string(
+                fromByteCount: Int64(byteCount),
                 countStyle: .file
             )
         }
