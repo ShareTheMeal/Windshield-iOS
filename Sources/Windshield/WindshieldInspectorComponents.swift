@@ -10,7 +10,7 @@
         }
 
         private var activeCount: Int {
-            transactions.count { $0.state == .inFlight }
+            transactions.filter { $0.state == .inFlight }.count
         }
 
         var body: some View {
