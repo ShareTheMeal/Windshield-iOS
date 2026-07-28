@@ -1,0 +1,175 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+
+jobs:
+  minimum-toolchain-build:
+    name: Xcode 15.0.1 compatibility
+    runs-on: macos-14
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_15.0.1.app/Contents/Developer
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Report minimum toolchain
+        run: |
+          xcodebuild -version
+          swift -version
+
+      - name: Build package for iOS
+        run: |
+          xcodebuild \
+            -scheme Windshield \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$RUNNER_TEMP/WindshieldMinimumToolchain" \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            build
+
+  strict-swift-tests:
+    name: Strict Swift tests
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Report toolchain
+        run: |
+          xcodebuild -version
+          swift -version
+
+      - name: Run strict tests
+        run: |
+          swift test \
+            -Xswiftc -strict-concurrency=complete \
+            -Xswiftc -warnings-as-errors
+
+  thread-sanitizer:
+    name: Thread Sanitizer
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    env:
+      TSAN_OPTIONS: halt_on_error=1:report_thread_leaks=0
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run tests with Thread Sanitizer
+        run: |
+          swift test \
+            --sanitize thread \
+            -Xswiftc -strict-concurrency=complete \
+            -Xswiftc -warnings-as-errors
+
+  ios-consumer-builds:
+    name: iOS package and demo builds
+    runs-on: macos-15-intel
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build package strictly for iOS
+        run: |
+          xcodebuild \
+            -scheme Windshield \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$RUNNER_TEMP/WindshieldPackage" \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_STRICT_CONCURRENCY=complete \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            build
+
+      - name: Build Debug demo consumer
+        run: |
+          xcodebuild \
+            -project Examples/WindshieldDemo/WindshieldDemo.xcodeproj \
+            -scheme WindshieldDemo \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$RUNNER_TEMP/WindshieldDemoDebug" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Build Release demo consumer
+        run: |
+          xcodebuild \
+            -project Examples/WindshieldDemo/WindshieldDemo.xcodeproj \
+            -scheme WindshieldDemo \
+            -configuration Release \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$RUNNER_TEMP/WindshieldDemoRelease" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+  ios-ui-smoke:
+    name: Demo UI smoke test
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Report simulator toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes available
+          xcrun simctl list devices available
+
+      - name: Run deterministic UI smoke test
+        run: |
+          xcodebuild \
+            -project Examples/WindshieldDemo/WindshieldDemo.xcodeproj \
+            -scheme WindshieldDemo \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=18.5" \
+            -destination-timeout 120 \
+            -derivedDataPath "$RUNNER_TEMP/WindshieldDemoUITests" \
+            -resultBundlePath "$RUNNER_TEMP/WindshieldDemoUITests.xcresult" \
+            -only-testing:WindshieldDemoUITests/WindshieldDemoUITests/testCapturedRequestAppearsInInspectorWithResponseBody \
+            test
+
+      - name: Upload failed UI test result
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: WindshieldDemoUITests-xcresult
+          path: ${{ runner.temp }}/WindshieldDemoUITests.xcresult
+          if-no-files-found: ignore
