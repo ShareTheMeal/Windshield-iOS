@@ -157,3 +157,7 @@ xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' buil
 ## Project status
 
 Windshield is an early development release. Persistence, export, redaction rules, and automatic presentation gestures are intentionally outside this first version.
+
+## License
+
+Windshield is available under the MIT License. See [LICENSE](LICENSE).
