@@ -256,6 +256,8 @@ import Foundation
         func record(_ event: WindshieldTransactionEvent)
     }
 
+    /// Reducer state is isolated on `queue`. Publication state is protected by
+    /// `publicationLock`, and observable store updates are delivered on the main actor.
     final class WindshieldTransactionRecorder: WindshieldRecording, @unchecked Sendable {
         static let shared = WindshieldTransactionRecorder()
 

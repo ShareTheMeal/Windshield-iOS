@@ -72,6 +72,94 @@ import XCTest
             )
         }
 
+        func testRepeatedStartLoadingCreatesOneTransportTaskAndOneTransaction() {
+            let context = makeContext(request: request(url: "https://example.com/items"))
+
+            context.protocolInstance.startLoading()
+            context.protocolInstance.startLoading()
+
+            XCTAssertEqual(context.transport.makeTaskCallCount, 1)
+            XCTAssertEqual(context.transport.task.resumeCallCount, 1)
+            XCTAssertEqual(context.recorder.events.count, 1)
+            guard let event = context.recorder.events.first,
+                  case .started = event
+            else {
+                return XCTFail("Expected one started transaction event")
+            }
+        }
+
+        func testStopBeforeStartPreventsLoadingWithoutRecordingCancellation() {
+            let context = makeContext(request: request(url: "https://example.com/items"))
+
+            context.protocolInstance.stopLoading()
+            context.protocolInstance.startLoading()
+
+            XCTAssertEqual(context.transport.makeTaskCallCount, 0)
+            XCTAssertEqual(context.transport.task.resumeCallCount, 0)
+            XCTAssertEqual(context.transport.task.cancelCallCount, 0)
+            XCTAssertTrue(context.recorder.events.isEmpty)
+            XCTAssertTrue(context.client.eventNames.isEmpty)
+        }
+
+        func testTransportCallbacksBeforeStartAreIgnored() throws {
+            let context = makeContext(request: request(url: "https://example.com/items"))
+
+            try context.protocolInstance.transportDidReceive(
+                httpResponse(url: "https://example.com/items")
+            )
+            context.protocolInstance.transportDidReceive(Data("early".utf8))
+            context.protocolInstance.transportDidComplete(with: nil)
+
+            XCTAssertTrue(context.recorder.events.isEmpty)
+            XCTAssertTrue(context.client.eventNames.isEmpty)
+
+            context.protocolInstance.startLoading()
+
+            XCTAssertEqual(context.transport.makeTaskCallCount, 1)
+            XCTAssertEqual(context.recorder.events.count, 1)
+        }
+
+        func testStopDuringStartRecordingPreventsTransportCreation() {
+            let context = makeContext(request: request(url: "https://example.com/items"))
+            context.recorder.recordHandler = { [weak protocolInstance = context.protocolInstance] event in
+                guard case .started = event else {
+                    return
+                }
+                protocolInstance?.stopLoading()
+            }
+
+            context.protocolInstance.startLoading()
+
+            XCTAssertEqual(context.transport.makeTaskCallCount, 0)
+            XCTAssertEqual(context.transport.task.resumeCallCount, 0)
+            XCTAssertEqual(context.transport.task.cancelCallCount, 0)
+            XCTAssertEqual(context.recorder.events.count, 2)
+            guard let event = context.recorder.events.last,
+                  case .cancelled = event
+            else {
+                return XCTFail("Expected a cancelled transaction event")
+            }
+        }
+
+        func testStopDuringTransportCreationCancelsWithoutResumingTheTask() {
+            let context = makeContext(request: request(url: "https://example.com/items"))
+            context.transport.makeTaskHandler = { [weak protocolInstance = context.protocolInstance] in
+                protocolInstance?.stopLoading()
+            }
+
+            context.protocolInstance.startLoading()
+
+            XCTAssertEqual(context.transport.makeTaskCallCount, 1)
+            XCTAssertEqual(context.transport.task.resumeCallCount, 0)
+            XCTAssertEqual(context.transport.task.cancelCallCount, 1)
+            XCTAssertEqual(context.recorder.events.count, 2)
+            guard let event = context.recorder.events.last,
+                  case .cancelled = event
+            else {
+                return XCTFail("Expected a cancelled transaction event")
+            }
+        }
+
         func testResponseAndPayloadAreForwardedIncrementallyAndRecordedOnCompletion() throws {
             let context = makeContext(request: request(url: "https://example.com/items"))
             context.protocolInstance.startLoading()
@@ -146,6 +234,96 @@ import XCTest
             }
         }
 
+        func testRepeatedStopLoadingCancelsAndRecordsExactlyOnce() throws {
+            let context = makeContext(request: request(url: "https://example.com/items"))
+            context.protocolInstance.startLoading()
+
+            context.protocolInstance.stopLoading()
+            context.protocolInstance.stopLoading()
+
+            XCTAssertEqual(context.transport.task.cancelCallCount, 1)
+            XCTAssertEqual(context.recorder.events.count, 2)
+            guard case .cancelled = try XCTUnwrap(context.recorder.events.last) else {
+                return XCTFail("Expected one cancelled transaction event")
+            }
+        }
+
+        func testCompletionAndCancellationRaceProducesOneTerminalOutcome() {
+            for _ in 0 ..< 100 {
+                let context = makeContext(request: request(url: "https://example.com/race"))
+                context.protocolInstance.startLoading()
+
+                let group = DispatchGroup()
+                group.enter()
+                DispatchQueue.global().async {
+                    context.transport.complete()
+                    group.leave()
+                }
+                group.enter()
+                DispatchQueue.global().async {
+                    context.protocolInstance.stopLoading()
+                    group.leave()
+                }
+
+                XCTAssertEqual(group.wait(timeout: .now() + 1), .success)
+                XCTAssertEqual(context.recorder.events.count, 2)
+
+                guard let terminalEvent = context.recorder.events.last else {
+                    return XCTFail("Expected one terminal transaction event")
+                }
+                switch terminalEvent {
+                case .completed:
+                    XCTAssertEqual(context.client.eventNames, ["finish"])
+                    XCTAssertEqual(context.transport.task.cancelCallCount, 0)
+
+                case .cancelled:
+                    XCTAssertTrue(context.client.eventNames.isEmpty)
+                    XCTAssertEqual(context.transport.task.cancelCallCount, 1)
+
+                default:
+                    XCTFail("Expected completion or cancellation")
+                }
+            }
+        }
+
+        func testFailureAndCancellationRaceProducesOneTerminalOutcome() {
+            for _ in 0 ..< 100 {
+                let context = makeContext(request: request(url: "https://example.com/race"))
+                context.protocolInstance.startLoading()
+
+                let group = DispatchGroup()
+                group.enter()
+                DispatchQueue.global().async {
+                    context.transport.complete(with: URLError(.timedOut))
+                    group.leave()
+                }
+                group.enter()
+                DispatchQueue.global().async {
+                    context.protocolInstance.stopLoading()
+                    group.leave()
+                }
+
+                XCTAssertEqual(group.wait(timeout: .now() + 1), .success)
+                XCTAssertEqual(context.recorder.events.count, 2)
+
+                guard let terminalEvent = context.recorder.events.last else {
+                    return XCTFail("Expected one terminal transaction event")
+                }
+                switch terminalEvent {
+                case .failed:
+                    XCTAssertEqual(context.client.eventNames, ["failure"])
+                    XCTAssertEqual(context.transport.task.cancelCallCount, 0)
+
+                case .cancelled:
+                    XCTAssertTrue(context.client.eventNames.isEmpty)
+                    XCTAssertEqual(context.transport.task.cancelCallCount, 1)
+
+                default:
+                    XCTFail("Expected failure or cancellation")
+                }
+            }
+        }
+
         func testStopLoadingWaitsForAnInFlightClientCallbackAndBlocksLaterDelivery() {
             let context = makeContext(request: request(url: "https://example.com/items"))
             context.protocolInstance.startLoading()
@@ -182,6 +360,27 @@ import XCTest
             context.transport.send(Data("late".utf8))
             XCTAssertEqual(context.client.loadedData, Data("first".utf8))
             XCTAssertEqual(context.client.eventNames, ["data"])
+        }
+
+        func testStopLoadingIsReentrantFromAClientDataCallback() {
+            let context = makeContext(request: request(url: "https://example.com/items"))
+            context.protocolInstance.startLoading()
+            context.client.dataHandler = { [weak protocolInstance = context.protocolInstance] _ in
+                protocolInstance?.stopLoading()
+            }
+
+            context.transport.send(Data("first".utf8))
+            context.transport.send(Data("late".utf8))
+
+            XCTAssertEqual(context.client.loadedData, Data("first".utf8))
+            XCTAssertEqual(context.client.eventNames, ["data"])
+            XCTAssertEqual(context.transport.task.cancelCallCount, 1)
+            XCTAssertEqual(context.recorder.events.count, 2)
+            guard let event = context.recorder.events.last,
+                  case .cancelled = event
+            else {
+                return XCTFail("Expected a cancelled transaction event")
+            }
         }
 
         func testRedirectIsForwardedWithoutTheHandledMarker() throws {
@@ -222,6 +421,29 @@ import XCTest
             }
             XCTAssertEqual(response.statusCode, 302)
             XCTAssertEqual(destination?.absoluteString, "https://example.com/new")
+        }
+
+        func testRedirectIsTerminalAndIgnoresCompletionAndStop() throws {
+            let context = makeContext(request: request(url: "https://example.com/old"))
+            context.protocolInstance.startLoading()
+            let redirectResponse = try httpResponse(
+                url: "https://example.com/old",
+                statusCode: 302
+            )
+
+            context.transport.redirect(
+                to: request(url: "https://example.com/new"),
+                response: redirectResponse
+            )
+            context.transport.complete()
+            context.protocolInstance.stopLoading()
+
+            XCTAssertEqual(context.client.eventNames, ["redirect"])
+            XCTAssertEqual(context.transport.task.cancelCallCount, 0)
+            XCTAssertEqual(context.recorder.events.count, 2)
+            guard case .redirected = try XCTUnwrap(context.recorder.events.last) else {
+                return XCTFail("Expected one redirected transaction event")
+            }
         }
 
         func testCaptureLimitDoesNotLimitThePayloadForwardedToTheClient() throws {
@@ -287,6 +509,37 @@ import XCTest
             context.protocolInstance.stopLoading()
 
             XCTAssertEqual(receivedDisposition, .cancelAuthenticationChallenge)
+            XCTAssertEqual(context.transport.task.cancelCallCount, 1)
+        }
+
+        func testCompletionCancelsAPendingAuthenticationChallenge() {
+            let context = makeContext(request: request(url: "https://example.com/private"))
+            context.protocolInstance.startLoading()
+
+            var receivedDisposition: URLSession.AuthChallengeDisposition?
+            context.transport.send(authenticationChallenge()) { disposition, _ in
+                receivedDisposition = disposition
+            }
+
+            context.transport.complete()
+
+            XCTAssertEqual(receivedDisposition, .cancelAuthenticationChallenge)
+            XCTAssertEqual(context.client.eventNames, ["challenge", "finish"])
+            XCTAssertEqual(context.transport.task.cancelCallCount, 0)
+        }
+
+        func testChallengeAfterStopIsCancelledWithoutClientDelivery() {
+            let context = makeContext(request: request(url: "https://example.com/private"))
+            context.protocolInstance.startLoading()
+            context.protocolInstance.stopLoading()
+
+            var receivedDisposition: URLSession.AuthChallengeDisposition?
+            context.transport.send(authenticationChallenge()) { disposition, _ in
+                receivedDisposition = disposition
+            }
+
+            XCTAssertEqual(receivedDisposition, .cancelAuthenticationChallenge)
+            XCTAssertTrue(context.client.eventNames.isEmpty)
             XCTAssertEqual(context.transport.task.cancelCallCount, 1)
         }
 
@@ -451,15 +704,19 @@ import XCTest
 
     private final class WindshieldTransportSpy: WindshieldTransporting {
         let task = WindshieldTransportTaskSpy()
+        private(set) var makeTaskCallCount = 0
         private(set) var request: URLRequest?
         private weak var observer: WindshieldTransportObserver?
+        var makeTaskHandler: (() -> Void)?
 
         func makeTask(
             for request: URLRequest,
             observer: WindshieldTransportObserver
         ) -> WindshieldTransportTask {
+            makeTaskCallCount += 1
             self.request = request
             self.observer = observer
+            makeTaskHandler?()
             return task
         }
 
@@ -502,9 +759,11 @@ import XCTest
 
     private final class WindshieldRecorderSpy: WindshieldRecording {
         private(set) var events: [WindshieldTransactionEvent] = []
+        var recordHandler: ((WindshieldTransactionEvent) -> Void)?
 
         func record(_ event: WindshieldTransactionEvent) {
             events.append(event)
+            recordHandler?(event)
         }
     }
 

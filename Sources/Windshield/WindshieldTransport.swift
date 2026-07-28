@@ -24,6 +24,9 @@ import Foundation
         ) -> WindshieldTransportTask
     }
 
+    /// The observer map is protected by `lock`. URLSession delegate callbacks run on
+    /// the single-operation delegate queue, and the shared session is immutable after
+    /// initialization.
     final class WindshieldURLSessionTransport: NSObject,
         WindshieldTransporting,
         @unchecked Sendable
