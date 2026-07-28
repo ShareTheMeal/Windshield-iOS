@@ -307,6 +307,16 @@ import Foundation
             }
         }
 
+        func flush() async {
+            await withCheckedContinuation { continuation in
+                queue.async {
+                    DispatchQueue.main.async {
+                        continuation.resume()
+                    }
+                }
+            }
+        }
+
         private func publishCurrentSnapshot() {
             revision += 1
             let publication = Publication(

@@ -190,7 +190,7 @@ import Foundation
         }
     }
 
-    enum WindshieldTransactionEvent {
+    enum WindshieldTransactionEvent: Equatable {
         case started(
             id: UUID,
             request: WindshieldRequestSnapshot,

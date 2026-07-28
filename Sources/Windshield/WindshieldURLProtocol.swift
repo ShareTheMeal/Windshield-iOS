@@ -8,8 +8,9 @@ import Foundation
     /// supported by background sessions. The protocol also cannot read every option
     /// from the originating URL session configuration, so apps with custom proxy,
     /// cookie, or connection-level trust behavior should validate their integration.
-    public final class WindshieldURLProtocol: URLProtocol, @unchecked Sendable {
+    final class WindshieldURLProtocol: URLProtocol, @unchecked Sendable {
         static let handledRequestKey = "dev.windshield.request-handled"
+        static let maximumCapturedRequestBodySize = 1_048_576
         static let maximumCapturedResponseBodySize = 1_048_576
 
         private let transactionID = UUID()
@@ -26,8 +27,9 @@ import Foundation
 
         var transport: WindshieldTransporting = WindshieldURLSessionTransport.shared
         var logger: WindshieldLogging = WindshieldConsoleLogger.shared
+        var recorder: WindshieldRecording = WindshieldTransactionRecorder.shared
 
-        override public class func canInit(with request: URLRequest) -> Bool {
+        override class func canInit(with request: URLRequest) -> Bool {
             guard URLProtocol.property(forKey: handledRequestKey, in: request) == nil else {
                 return false
             }
@@ -39,16 +41,27 @@ import Foundation
             return scheme == "http" || scheme == "https"
         }
 
-        override public class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest {
             request
         }
 
-        override public func startLoading() {
+        override func startLoading() {
             lifecycle.sync {
                 guard !hasStarted, !isStopped else {
                     return
                 }
                 hasStarted = true
+
+                recorder.record(
+                    .started(
+                        id: transactionID,
+                        request: WindshieldRequestSnapshot(
+                            request: request,
+                            maximumBodyByteCount: Self.maximumCapturedRequestBodySize
+                        ),
+                        at: Date()
+                    )
+                )
 
                 guard let handledRequest = Self.markedAsHandled(request) else {
                     completeBeforeTransportStarts(with: URLError(.badURL))
@@ -63,17 +76,28 @@ import Foundation
             }
         }
 
-        override public func stopLoading() {
+        override func stopLoading() {
             let cancellation = lifecycle.sync { () -> Cancellation in
                 guard !isStopped else {
-                    return Cancellation(task: nil, challengeSender: nil)
+                    return Cancellation(
+                        task: nil,
+                        challengeSender: nil,
+                        event: nil
+                    )
                 }
 
                 isStopped = true
 
                 let cancellation = Cancellation(
                     task: transportTask,
-                    challengeSender: authenticationChallengeSender
+                    challengeSender: authenticationChallengeSender,
+                    event: hasStarted && !hasCompleted
+                        ? .cancelled(
+                            id: transactionID,
+                            body: capturedBodySnapshot(),
+                            at: Date()
+                        )
+                        : nil
                 )
                 transportTask = nil
                 authenticationChallengeSender = nil
@@ -83,6 +107,9 @@ import Foundation
                 return cancellation
             }
 
+            if let event = cancellation.event {
+                recorder.record(event)
+            }
             cancellation.challengeSender?.cancel()
             cancellation.task?.cancel()
         }
@@ -95,6 +122,7 @@ import Foundation
         private struct Cancellation {
             let task: WindshieldTransportTask?
             let challengeSender: WindshieldAuthenticationChallengeSender?
+            let event: WindshieldTransactionEvent?
         }
 
         private static func markedAsHandled(_ request: URLRequest) -> URLRequest? {
@@ -126,6 +154,14 @@ import Foundation
             hasCompleted = true
 
             logger.log(.failure(id: transactionID, request: request, error: error))
+            recorder.record(
+                .failed(
+                    id: transactionID,
+                    body: capturedBodySnapshot(),
+                    failure: WindshieldFailure(error: error),
+                    at: Date()
+                )
+            )
             client?.urlProtocol(self, didFailWithError: error)
         }
 
@@ -138,6 +174,14 @@ import Foundation
                 response: response,
                 body: capturedResponseBody,
                 totalBodyByteCount: receivedResponseBodyByteCount
+            )
+        }
+
+        private func capturedBodySnapshot() -> WindshieldBodyCapture {
+            .capture(
+                capturedResponseBody,
+                totalByteCount: receivedResponseBodyByteCount,
+                maximumByteCount: Self.maximumCapturedResponseBodySize
             )
         }
 
@@ -170,6 +214,14 @@ import Foundation
                 }
 
                 self.response = response as? HTTPURLResponse
+                if let response = response as? HTTPURLResponse {
+                    recorder.record(
+                        .receivedResponse(
+                            id: transactionID,
+                            response: WindshieldResponseSnapshot(response: response)
+                        )
+                    )
+                }
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .allowed)
             }
         }
@@ -213,8 +265,23 @@ import Foundation
 
                 if let error {
                     logger.log(.failure(id: transactionID, request: request, error: error))
+                    recorder.record(
+                        .failed(
+                            id: transactionID,
+                            body: capturedBodySnapshot(),
+                            failure: WindshieldFailure(error: error),
+                            at: Date()
+                        )
+                    )
                     client?.urlProtocol(self, didFailWithError: error)
                 } else {
+                    recorder.record(
+                        .completed(
+                            id: transactionID,
+                            body: capturedBodySnapshot(),
+                            at: Date()
+                        )
+                    )
                     client?.urlProtocolDidFinishLoading(self)
                 }
             }
@@ -235,6 +302,16 @@ import Foundation
                     response,
                     body: snapshot.body,
                     totalBodyByteCount: snapshot.totalBodyByteCount
+                )
+
+                recorder.record(
+                    .redirected(
+                        id: transactionID,
+                        response: WindshieldResponseSnapshot(response: response),
+                        body: capturedBodySnapshot(),
+                        destination: request.url,
+                        at: Date()
+                    )
                 )
 
                 let redirectRequest = Self.removingHandledMarker(from: request)

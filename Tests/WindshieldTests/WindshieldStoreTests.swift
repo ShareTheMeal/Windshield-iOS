@@ -182,6 +182,33 @@ import XCTest
             XCTAssertEqual(streamed.body.totalByteCount, 6)
         }
 
+        func testRecorderPublishesReducedTransactionsOnTheMainActor() async {
+            let recorder = WindshieldTransactionRecorder.shared
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+
+            let id = UUID()
+            recorder.record(.started(id: id, request: request(), at: Date()))
+            recorder.record(.receivedResponse(id: id, response: response()))
+            recorder.record(.completed(id: id, body: body("published"), at: Date()))
+            await recorder.flush()
+
+            let transaction = await MainActor.run {
+                XCTAssertTrue(Thread.isMainThread)
+                return WindshieldStore.shared.transactions.first
+            }
+            XCTAssertEqual(transaction?.id, id)
+            XCTAssertEqual(transaction?.state, .completed)
+            XCTAssertEqual(transaction?.response?.body, body("published"))
+
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+        }
+
         private func request(body text: String = "") -> WindshieldRequestSnapshot {
             var request = URLRequest(url: URL(string: "https://example.com/items")!)
             request.httpMethod = "POST"
