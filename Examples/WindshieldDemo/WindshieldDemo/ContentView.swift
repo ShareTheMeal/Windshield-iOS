@@ -46,7 +46,7 @@ struct ContentView: View {
                             isInspectorPresented = true
                         }
                     } footer: {
-                        Text("Windshield is linked and presented only in Debug builds.")
+                        Text("Touch and hold with three fingers, or use the button. Windshield is available only in Debug builds.")
                     }
                 #endif
             }
@@ -54,9 +54,10 @@ struct ContentView: View {
         }
         .navigationViewStyle(.stack)
         #if DEBUG
-            .sheet(isPresented: $isInspectorPresented) {
-                WindshieldInspectorView()
-            }
+            .windshieldInspector(
+                isPresented: $isInspectorPresented,
+                trigger: .threeFingerLongPress
+            )
         #endif
     }
 

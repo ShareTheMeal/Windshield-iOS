@@ -153,6 +153,21 @@ jobs:
           xcrun simctl list runtimes available
           xcrun simctl list devices available
 
+      - name: Run presentation gesture tests
+        run: |
+          xcodebuild \
+            -scheme Windshield \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=18.5" \
+            -destination-timeout 120 \
+            -derivedDataPath "$RUNNER_TEMP/WindshieldPresentationTests" \
+            -resultBundlePath "$RUNNER_TEMP/WindshieldPresentationTests.xcresult" \
+            -only-testing:WindshieldTests/WindshieldInspectorPresentationTests \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_STRICT_CONCURRENCY=complete \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            test
+
       - name: Run deterministic UI smoke test
         run: |
           xcodebuild \
@@ -170,6 +185,8 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: WindshieldDemoUITests-xcresult
-          path: ${{ runner.temp }}/WindshieldDemoUITests.xcresult
+          name: Windshield-iOS-tests-xcresult
+          path: |
+            ${{ runner.temp }}/WindshieldPresentationTests.xcresult
+            ${{ runner.temp }}/WindshieldDemoUITests.xcresult
           if-no-files-found: ignore
