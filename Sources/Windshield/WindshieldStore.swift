@@ -279,10 +279,11 @@ import Foundation
         private init() {
             let source = DispatchSource.makeUserDataAddSource(queue: .main)
             publicationSource = source
-            source.setEventHandler { [weak self] in
+            source.setEventHandler {
                 dispatchPrecondition(condition: .onQueue(.main))
                 Task { @MainActor in
-                    self?.publishPendingSnapshotOnMainActor()
+                    WindshieldTransactionRecorder.shared
+                        .publishPendingSnapshotOnMainActor()
                 }
             }
             source.activate()
