@@ -293,6 +293,43 @@ import XCTest
             await recorder.flush()
         }
 
+        func testRecorderPublishesAutomaticallyWithoutFlush() async {
+            let recorder = WindshieldTransactionRecorder.shared
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+
+            let id = UUID()
+            recorder.record(.started(id: id, request: request(), at: Date()))
+            recorder.record(.receivedResponse(id: id, response: response()))
+            recorder.record(.completed(id: id, body: body("published"), at: Date()))
+
+            var didPublishCompletedTransaction = false
+            for _ in 0 ..< 200 {
+                didPublishCompletedTransaction = await MainActor.run {
+                    XCTAssertTrue(Thread.isMainThread)
+                    guard let transaction = WindshieldStore.shared.transactions.first else {
+                        return false
+                    }
+
+                    return transaction.id == id && transaction.state == .completed
+                }
+                if didPublishCompletedTransaction {
+                    break
+                }
+
+                try? await Task<Never, Never>.sleep(nanoseconds: 10_000_000)
+            }
+
+            XCTAssertTrue(didPublishCompletedTransaction)
+
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+        }
+
         func testRecorderFlushPublishesTheLatestQueuedRevision() async {
             let recorder = WindshieldTransactionRecorder.shared
             await MainActor.run {
