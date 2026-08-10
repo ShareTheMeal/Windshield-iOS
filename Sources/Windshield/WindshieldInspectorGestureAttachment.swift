@@ -124,7 +124,7 @@
             true
         }
 
-        func gestureRecognizerShouldBegin(_: UIGestureRecognizer) -> Bool {
+        override func gestureRecognizerShouldBegin(_: UIGestureRecognizer) -> Bool {
             isTriggerEnabled && !isVoiceOverRunning() && !hasExistingPresentation
         }
 
