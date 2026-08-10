@@ -15,14 +15,14 @@ The interception core also builds on macOS 12 for package tests and tooling. The
 
 ## Add the package
 
-After this repository is available on GitHub, add its URL in Xcode under **File → Add Package Dependencies**.
+Add the repository URL in Xcode under **File → Add Package Dependencies**.
 
 For a tagged release, a package manifest can use:
 
 ```swift
 .package(
     url: "https://github.com/initishbhatt/Windshield.git",
-    from: "0.2.0"
+    from: "0.3.0"
 )
 ```
 
@@ -36,6 +36,44 @@ During early development, you can point at `main` instead:
 ```
 
 Add `Windshield` to the application target. Keep setup and presentation code inside `#if DEBUG` because the implementation is intentionally excluded from Release builds.
+
+## Minimal integration
+
+For apps whose sessions honor global `URLProtocol` registration, the complete
+Debug integration is one startup call and one root view modifier:
+
+```swift
+import SwiftUI
+
+#if DEBUG
+import Windshield
+#endif
+
+@main
+struct ExampleApp: App {
+    init() {
+        #if DEBUG
+        Windshield.start()
+        #endif
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            #if DEBUG
+            ContentView()
+                .windshieldInspector()
+            #else
+            ContentView()
+            #endif
+        }
+    }
+}
+```
+
+`start()` begins capture but never opens UI by itself. The modifier gives SwiftUI
+a window-scoped presentation anchor; a deliberate three-finger, one-second hold
+then opens the inspector. This split avoids process-wide window lookup,
+first-responder takeover, and presenting over an existing host modal.
 
 ## Start interception
 
@@ -79,37 +117,49 @@ Values below one are treated as one retained transaction.
 
 ## Present the inspector
 
-Present the built-in view with a normal SwiftUI sheet:
+Attach the inspector modifier once near the root of each window. Touch and hold
+anywhere with three fingers for one second to open the inspector as a sheet:
 
 ```swift
-#if DEBUG
-@State private var isShowingWindshield = false
-#endif
-
 var body: some View {
     #if DEBUG
     ContentView()
-        .toolbar {
-            Button("Traffic") {
-                isShowingWindshield = true
-            }
-        }
-        .sheet(isPresented: $isShowingWindshield) {
-            WindshieldInspectorView()
-        }
+        .windshieldInspector()
     #else
     ContentView()
     #endif
 }
 ```
 
-Or use the convenience modifier:
+The gesture does not request notification or motion permissions. Its recognizer
+is configured not to cancel or delay the app's touches and requests simultaneous
+recognition with the host app's gestures. Windshield disables it while VoiceOver
+or its own sheet is active, and ignores it while the containing window is already
+presenting another view.
+
+For a debug-menu button or an app that already uses three-finger gestures, keep
+presentation under the app's control:
 
 ```swift
 #if DEBUG
 .windshieldInspector(isPresented: $isShowingWindshield)
 #endif
 ```
+
+An app can support both entry points with one sheet state:
+
+```swift
+#if DEBUG
+.windshieldInspector(
+    isPresented: $isShowingWindshield,
+    trigger: .threeFingerLongPress
+)
+#endif
+```
+
+Capture continues while the inspector is closed. Opening it reads the current
+in-memory snapshot and then receives live updates; no push notification or
+external service populates the interface.
 
 The inspector provides:
 
@@ -140,11 +190,12 @@ Windshield is designed for debug diagnostics, not production monitoring.
 - The forwarding session cannot reproduce every originating session policy. Apps using custom proxies, cookie stores, or custom protocol chains should validate their integration.
 - Authentication delegates, client certificates, certificate pinning, and custom server-trust decisions from the originating session are not forwarded. Windshield uses Foundation's default challenge handling. Preemptive `Authorization` headers are preserved. Do not intercept sessions that depend on custom authentication or trust callbacks.
 - Streamed request bodies are reported but not read.
+- Attach the presentation modifier once per window. Windshield disables the gesture while VoiceOver is active. If another host or accessibility workflow uses three-finger long presses, use binding-based manual presentation instead.
 - Captured URLs, query strings, headers, and payloads may contain credentials or personal data. Never enable Windshield in production.
 
 ## Try the demo
 
-Open `Examples/WindshieldDemo/WindshieldDemo.xcodeproj`, run the `WindshieldDemo` scheme, send the sample request, then open the inspector. The example consumes this repository as a local Swift package.
+Open `Examples/WindshieldDemo/WindshieldDemo.xcodeproj`, run the `WindshieldDemo` scheme, send the sample request, then use the three-finger long press or the manual button. The example consumes this repository as a local Swift package.
 
 ## Validate changes
 
@@ -156,9 +207,9 @@ xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' buil
 
 ## Project status
 
-The current release is `0.2.0`. Windshield follows [Semantic Versioning](https://semver.org/). While the package is below `1.0.0`, its public API may evolve between minor releases.
+The current release is `0.3.0`. Windshield follows [Semantic Versioning](https://semver.org/). While the package is below `1.0.0`, its public API may evolve between minor releases.
 
-Persistence, export, redaction rules, and automatic presentation gestures are intentionally outside this release. See [CHANGELOG.md](CHANGELOG.md) for release details.
+Persistence, export, redaction rules, and additional automatic presentation triggers are intentionally outside this release. See [CHANGELOG.md](CHANGELOG.md) for release details.
 
 ## License
 
