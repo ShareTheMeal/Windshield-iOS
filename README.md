@@ -22,7 +22,7 @@ For a tagged release, a package manifest can use:
 ```swift
 .package(
     url: "https://github.com/initishbhatt/Windshield.git",
-    from: "0.1.0"
+    from: "0.2.0"
 )
 ```
 
@@ -156,7 +156,9 @@ xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' buil
 
 ## Project status
 
-Windshield is an early development release. Persistence, export, redaction rules, and automatic presentation gestures are intentionally outside this first version.
+The current release is `0.2.0`. Windshield follows [Semantic Versioning](https://semver.org/). While the package is below `1.0.0`, its public API may evolve between minor releases.
+
+Persistence, export, redaction rules, and automatic presentation gestures are intentionally outside this release. See [CHANGELOG.md](CHANGELOG.md) for release details.
 
 ## License
 
