@@ -124,7 +124,7 @@ jobs:
           xcrun simctl list runtimes available
           xcrun simctl list devices available
 
-      - name: Run presentation gesture tests
+      - name: Run iOS-only package tests
         run: |
           xcodebuild \
             -scheme Windshield \
@@ -134,6 +134,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/WindshieldPresentationTests" \
             -resultBundlePath "$RUNNER_TEMP/WindshieldPresentationTests.xcresult" \
             -only-testing:WindshieldTests/WindshieldInspectorPresentationTests \
+            -only-testing:WindshieldTests/WindshieldPayloadInspectorTests \
             CODE_SIGNING_ALLOWED=NO \
             ARCHS=arm64 \
             SWIFT_STRICT_CONCURRENCY=complete \

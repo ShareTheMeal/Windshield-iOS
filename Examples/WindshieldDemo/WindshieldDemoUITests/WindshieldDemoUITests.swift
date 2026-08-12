@@ -41,6 +41,18 @@ final class WindshieldDemoUITests: XCTestCase {
         transaction.tap()
 
         XCTAssertTrue(app.navigationBars["Request"].waitForExistence(timeout: 5))
+        let performance = app.staticTexts["Performance"]
+        for _ in 0 ..< 4 where !performance.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(performance.waitForExistence(timeout: 5))
+
+        let responseKind = app.staticTexts["JSON"]
+        for _ in 0 ..< 6 where !responseKind.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(responseKind.waitForExistence(timeout: 5))
+
         let responseBody = element(
             containingLabel: "windshield-smoke-test",
             in: app
@@ -49,6 +61,12 @@ final class WindshieldDemoUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(responseBody.waitForExistence(timeout: 5))
+
+        let bodySearch = app.textFields["Search response body"]
+        XCTAssertTrue(bodySearch.waitForExistence(timeout: 5))
+        bodySearch.tap()
+        bodySearch.typeText("smoke")
+        XCTAssertTrue(app.staticTexts["1 match"].waitForExistence(timeout: 5))
     }
 
     private func element(
