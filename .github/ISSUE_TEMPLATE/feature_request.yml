@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest an improvement for Windshield.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What debugging problem or workflow gap are you trying to solve?
+      placeholder: Describe the use case, not only the proposed solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like Windshield to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and scope
+      description: Share any workarounds, API ideas, or behavior that should stay out of scope.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add mockups, examples, or links if they help explain the request. Do not include secrets or captured private data.

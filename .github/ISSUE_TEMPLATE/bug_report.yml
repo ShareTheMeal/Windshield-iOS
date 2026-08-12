@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible problem in Windshield.
+title: "[Bug]: "
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem and its impact on the host app.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Configure Windshield using ...
+        2. Make a request to ...
+        3. Open the inspector ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Windshield version
+      placeholder: 0.5.0
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Xcode, iOS, device or Simulator, and Swift versions when known.
+      placeholder: Xcode 26.0, iOS 26.0, iPhone Simulator
+    validations:
+      required: true
+
+  - type: dropdown
+    id: setup
+    attributes:
+      label: Windshield setup
+      options:
+        - Configuration-based start
+        - Global start
+        - Inspector UI only
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Add minimal logs or screenshots if useful. Remove credentials, cookies, tokens, and private payload data first.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed secrets and private captured data from this report.
+          required: true
