@@ -2,7 +2,7 @@
 
 Windshield is a development-only HTTP inspector for iOS. It captures `URLSession` traffic with `URLProtocol` and gives your debug build a native SwiftUI traffic viewer, directly on the device.
 
-Windshield keeps captured traffic in memory. It does not persist, upload, or print request data to the console.
+Windshield keeps captured traffic in memory. It does not persist, upload, or print request data to the console. Common credential and cookie headers are redacted before they enter that in-memory log.
 
 ## Requirements
 
@@ -16,7 +16,7 @@ The interception core also builds on macOS 12 for package tests and tooling. The
 ## Add the package
 
 Add the repository URL in Xcode under **File → Add Package Dependencies**.
-Until `0.3.0` is tagged, select the `main` branch. A package manifest can use:
+Until `0.4.0` is tagged, select the `main` branch. A package manifest can use:
 
 ```swift
 .package(
@@ -25,12 +25,12 @@ Until `0.3.0` is tagged, select the `main` branch. A package manifest can use:
 )
 ```
 
-After the `0.3.0` tag is published, prefer a version-based dependency:
+After the `0.4.0` tag is published, prefer a version-based dependency:
 
 ```swift
 .package(
     url: "https://github.com/initishbhatt/Windshield.git",
-    from: "0.3.0"
+    from: "0.4.0"
 )
 ```
 
@@ -128,6 +128,64 @@ Windshield.start(intercepting: configuration, maximumTransactions: 250)
 
 Values below one are treated as one retained transaction.
 
+## Protect sensitive traffic
+
+The zero-argument `Windshield.start()` remains the normal setup. It now redacts
+`Authorization`, `Proxy-Authorization`, `Cookie`, and `Set-Cookie` values before
+they enter Windshield's store or copyable UI. Header names remain visible, with
+the value shown as `<redacted>`. The original headers still reach the server.
+
+Use `Windshield.Options` when an app needs additional privacy rules:
+
+```swift
+#if DEBUG
+let options = Windshield.Options(
+    maximumTransactions: 250,
+    additionalRedactedHeaderNames: ["X-API-Key", "X-Session-Token"],
+    ignoredHosts: ["metrics.example.com"],
+    ignoredURLRules: [
+        .init(host: "api.example.com", pathPrefix: "/health"),
+    ],
+    metadataOnlyURLRules: [
+        .init(
+            host: "api.example.com",
+            pathPrefix: "/payments",
+            httpMethods: ["POST"]
+        ),
+    ]
+)
+
+Windshield.start(intercepting: configuration, options: options)
+#endif
+```
+
+For best-effort global registration, pass the same value to
+`Windshield.start(options: options)` instead.
+
+The policies have deliberately narrow behavior:
+
+- Additional header names extend the secure default set and are matched
+  case-insensitively.
+- An ignored host matches that exact host, case-insensitively. It does not
+  silently match subdomains.
+- A URL rule matches an exact host plus an optional literal path prefix and an
+  optional set of HTTP methods. Set `includesSubdomains: true` when that broader
+  match is intentional.
+- An ignored request creates no inspector row and stores none of its URL,
+  headers, or payload. The request and response still flow normally.
+- A metadata-only request keeps its URL, method, redacted headers, status,
+  timing, and known body sizes, but stores no request or response body bytes.
+- Ignore takes precedence when the same request matches both rule sets.
+
+Capture options are process-wide because a custom `URLProtocol` instance does
+not receive its originating session configuration. Global setup applies its
+options immediately; targeted setup applies them after the supplied
+configuration is accepted. The most recently applied options supply the policy
+for newly started requests. Each request takes one immutable policy snapshot,
+so changing options never changes an in-flight transaction halfway through
+capture. It also does not rewrite rows that are already in memory; clear the
+inspector when changing a policy during a run.
+
 ## Present the inspector
 
 Attach the inspector modifier once near the root of each window. Touch and hold
@@ -200,7 +258,7 @@ The inspector provides:
 
 ## What is captured
 
-Windshield records the URL, HTTP method, headers, timestamps, duration, response status, error details, and available request and response bodies.
+Windshield records the URL, HTTP method, redacted headers, timestamps, duration, response status, error details, and available request and response bodies. Ignored and metadata-only rules can reduce what reaches the in-memory store.
 
 Each body is capped at 1 MiB. The store keeps at most 20 MiB of captured body data in total. When the total budget is reached, Windshield discards payload bytes from older completed requests while retaining their metadata. A large body is always forwarded to the app in full.
 
@@ -215,10 +273,10 @@ Windshield is designed for debug diagnostics, not production monitoring.
 - Existing sessions cannot be modified after initialization.
 - Global registration is best effort. Prefer `start(intercepting:)` when you own the configuration.
 - The forwarding session cannot reproduce every originating session policy. Apps using custom proxies, cookie stores, or custom protocol chains should validate their integration.
-- Authentication delegates, client certificates, certificate pinning, and custom server-trust decisions from the originating session are not forwarded. Windshield uses Foundation's default challenge handling. Preemptive `Authorization` headers are preserved. Do not intercept sessions that depend on custom authentication or trust callbacks.
+- Authentication delegates, client certificates, certificate pinning, and custom server-trust decisions from the originating session are not forwarded. Windshield uses Foundation's default challenge handling. Preemptive `Authorization` headers are preserved on the network and redacted in the inspector. Do not intercept sessions that depend on custom authentication or trust callbacks.
 - Streamed request bodies are reported but not read.
 - Attach the presentation modifier once per window. Windshield disables the gesture while VoiceOver is active. If another host or accessibility workflow uses three-finger long presses, use binding-based manual presentation instead.
-- Captured URLs, query strings, headers, and payloads may contain credentials or personal data. Never enable Windshield in production.
+- URLs, query strings, nonstandard headers, and payloads may still contain credentials or personal data. Add app-specific redaction, ignore, or metadata-only rules, and never enable Windshield in production.
 
 ## Try the demo
 
@@ -234,11 +292,11 @@ xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' buil
 
 ## Project status
 
-The next tagged release is `0.3.0`; its implementation is currently available
+The next tagged release is `0.4.0`; its implementation is currently available
 from `main`. Windshield follows [Semantic Versioning](https://semver.org/). While
 the package is below `1.0.0`, its public API may evolve between minor releases.
 
-Persistence, export, redaction rules, and additional automatic presentation triggers are intentionally outside this release. See [CHANGELOG.md](CHANGELOG.md) for release details.
+Persistence, export, response rewriting, and additional automatic presentation triggers are intentionally outside this release. See [CHANGELOG.md](CHANGELOG.md) for release details.
 
 ## License
 

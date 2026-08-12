@@ -2,6 +2,27 @@
 
 Windshield follows [Semantic Versioning](https://semver.org/).
 
+## 0.4.0 - Unreleased
+
+### Added
+
+- A backward-compatible `Windshield.Options` setup API for process-wide privacy and capture policies.
+- Case-insensitive custom header redaction in addition to secure built-in defaults.
+- Exact ignored-host rules and declarative host, path-prefix, method, and subdomain URL rules.
+- Metadata-only rules that retain transaction metadata and known body sizes without storing payload bytes.
+
+### Changed
+
+- `Authorization`, `Proxy-Authorization`, `Cookie`, and `Set-Cookie` values are now redacted before request or response snapshots enter the in-memory store.
+- Each request snapshots its capture policy at startup so later configuration changes apply only to new requests.
+
+### Safety
+
+- Redaction changes only Windshield's recorded snapshot; the original network headers are preserved.
+- Ignored requests still use the same interception and forwarding lifecycle while emitting no recorder events.
+- Metadata-only capture forwards every response byte to the host app while keeping those bytes out of Windshield's buffer.
+- Policy replacement is lock-protected and covered by strict-concurrency and concurrent snapshot tests.
+
 ## 0.3.0 - 2026-08-10
 
 ### Added
