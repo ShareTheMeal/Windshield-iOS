@@ -5,6 +5,7 @@ import Foundation
         case all = "All"
         case errors = "Errors"
         case active = "Active"
+        case slow = "Slow"
 
         var id: Self {
             self
@@ -42,6 +43,8 @@ import Foundation
                 transaction.isError
             case .active:
                 transaction.state == .inFlight
+            case .slow:
+                transaction.isSlow
             }
         }
 
@@ -69,153 +72,6 @@ import Foundation
         }
     }
 
-    enum WindshieldBodyFormatter {
-        static let defaultDisplayByteLimit = 128 * 1024
-
-        static func format(
-            _ body: WindshieldBodyCapture?,
-            displayByteLimit: Int = defaultDisplayByteLimit
-        ) -> String {
-            guard let body else {
-                return "Waiting for response body."
-            }
-
-            switch body.contents {
-            case let .unavailable(reason):
-                return unavailableDescription(reason, totalByteCount: body.totalByteCount)
-
-            case let .bytes(data):
-                return formatBytes(
-                    data,
-                    totalByteCount: body.totalByteCount,
-                    displayByteLimit: max(1, displayByteLimit)
-                )
-            }
-        }
-
-        private static func unavailableDescription(
-            _ reason: WindshieldBodyCapture.UnavailableReason,
-            totalByteCount: Int?
-        ) -> String {
-            let size = totalByteCount.map(WindshieldDisplayFormatter.byteCount)
-
-            switch reason {
-            case .bodyStream:
-                if let size {
-                    return "Streamed request body is unavailable. Reported size: \(size)."
-                }
-                return "Streamed request body is unavailable."
-
-            case .discardedByRetentionPolicy:
-                if let size {
-                    return "Body was discarded to stay within Windshield's memory limit. Size: \(size)."
-                }
-                return "Body was discarded to stay within Windshield's memory limit."
-
-            case .excludedByCapturePolicy:
-                if let size {
-                    return "Body was not captured by the metadata-only policy. Size: \(size)."
-                }
-                return "Body was not captured by the metadata-only policy."
-            }
-        }
-
-        private static func formatBytes(
-            _ data: Data,
-            totalByteCount: Int?,
-            displayByteLimit: Int
-        ) -> String {
-            guard !data.isEmpty else {
-                return "No body."
-            }
-
-            let displayedData = displayData(
-                from: data,
-                displayByteLimit: displayByteLimit
-            )
-            let isDisplayLimited = displayedData.count < data.count
-            let content = formattedContent(
-                displayedData,
-                canPrettyPrintJSON: !isDisplayLimited
-            )
-
-            var notices: [String] = []
-            if let totalByteCount, data.count < totalByteCount {
-                notices.append(
-                    "Captured \(WindshieldDisplayFormatter.byteCount(data.count)) of "
-                        + "\(WindshieldDisplayFormatter.byteCount(totalByteCount))."
-                )
-            }
-            if isDisplayLimited {
-                notices.append(
-                    "Showing the first "
-                        + "\(WindshieldDisplayFormatter.byteCount(displayedData.count)) "
-                        + "of the captured body."
-                )
-            }
-
-            guard !notices.isEmpty else {
-                return content
-            }
-
-            return content + "\n\n[" + notices.joined(separator: " ") + "]"
-        }
-
-        private static func displayData(
-            from data: Data,
-            displayByteLimit: Int
-        ) -> Data {
-            let limitedData = Data(data.prefix(displayByteLimit))
-            guard limitedData.count < data.count,
-                  String(data: limitedData, encoding: .utf8) == nil
-            else {
-                return limitedData
-            }
-
-            let maximumExtension = min(3, data.count - limitedData.count)
-            guard maximumExtension > 0 else {
-                return limitedData
-            }
-
-            for additionalByteCount in 1 ... maximumExtension {
-                let candidate = Data(
-                    data.prefix(limitedData.count + additionalByteCount)
-                )
-                if String(data: candidate, encoding: .utf8) != nil {
-                    return candidate
-                }
-            }
-
-            return limitedData
-        }
-
-        private static func formattedContent(
-            _ data: Data,
-            canPrettyPrintJSON: Bool
-        ) -> String {
-            if canPrettyPrintJSON,
-               let object = try? JSONSerialization.jsonObject(
-                   with: data,
-                   options: .fragmentsAllowed
-               ),
-               JSONSerialization.isValidJSONObject(object),
-               let prettyData = try? JSONSerialization.data(
-                   withJSONObject: object,
-                   options: [.prettyPrinted, .sortedKeys]
-               ),
-               let prettyJSON = String(data: prettyData, encoding: .utf8)
-            {
-                return prettyJSON
-            }
-
-            if let text = String(data: data, encoding: .utf8) {
-                return text
-            }
-
-            return "Binary body, \(WindshieldDisplayFormatter.byteCount(data.count)) captured."
-        }
-    }
-
     enum WindshieldHeaderFormatter {
         static func format(_ headers: [WindshieldHeader]) -> String {
             guard !headers.isEmpty else {
@@ -238,6 +94,17 @@ import Foundation
 
             return ByteCountFormatter.string(
                 fromByteCount: Int64(byteCount),
+                countStyle: .file
+            )
+        }
+
+        static func byteCount(_ byteCount: Int64) -> String {
+            guard byteCount > 0 else {
+                return "0 bytes"
+            }
+
+            return ByteCountFormatter.string(
+                fromByteCount: byteCount,
                 countStyle: .file
             )
         }
@@ -269,6 +136,18 @@ import Foundation
     }
 
     extension WindshieldTransaction {
+        var observedDuration: TimeInterval? {
+            networkMetrics?.observedDuration ?? duration
+        }
+
+        var isSlow: Bool {
+            guard isTerminal, let observedDuration else {
+                return false
+            }
+
+            return observedDuration >= WindshieldNetworkMetrics.slowThreshold
+        }
+
         var responseBodyByteCount: Int? {
             response?.body?.totalByteCount ?? response?.expectedBodyByteCount
         }
@@ -294,6 +173,60 @@ import Foundation
             case .completed:
                 response.map { String($0.statusCode) } ?? "Complete"
             }
+        }
+    }
+
+    struct WindshieldHostLatencySummary: Identifiable, Equatable {
+        let host: String
+        let sampleCount: Int
+        let averageDuration: TimeInterval
+        let maximumDuration: TimeInterval
+
+        var id: String {
+            host
+        }
+    }
+
+    enum WindshieldPerformanceSummary {
+        static func slowestHosts(
+            in transactions: [WindshieldTransaction],
+            limit: Int = 3
+        ) -> [WindshieldHostLatencySummary] {
+            guard limit > 0 else {
+                return []
+            }
+
+            var durationsByHost: [String: [TimeInterval]] = [:]
+            for transaction in transactions where transaction.isTerminal {
+                guard let host = transaction.request.url?.host?.lowercased(),
+                      !host.isEmpty,
+                      let duration = transaction.observedDuration
+                else {
+                    continue
+                }
+
+                durationsByHost[host, default: []].append(max(0, duration))
+            }
+
+            return durationsByHost.map { host, durations in
+                WindshieldHostLatencySummary(
+                    host: host,
+                    sampleCount: durations.count,
+                    averageDuration: durations.reduce(0, +) / TimeInterval(durations.count),
+                    maximumDuration: durations.max() ?? 0
+                )
+            }
+            .sorted {
+                if $0.averageDuration != $1.averageDuration {
+                    return $0.averageDuration > $1.averageDuration
+                }
+                if $0.maximumDuration != $1.maximumDuration {
+                    return $0.maximumDuration > $1.maximumDuration
+                }
+                return $0.host < $1.host
+            }
+            .prefix(limit)
+            .map { $0 }
         }
     }
 #endif

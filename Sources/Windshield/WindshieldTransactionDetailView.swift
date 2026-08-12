@@ -62,13 +62,18 @@
                     }
                 }
 
+                if let metrics = transaction.networkMetrics {
+                    WindshieldPerformanceSections(metrics: metrics)
+                }
+
                 WindshieldHeadersSection(
                     title: "Request headers",
                     headers: transaction.request.headers
                 )
                 WindshieldBodySection(
                     title: "Request body",
-                    capture: transaction.request.body
+                    capture: transaction.request.body,
+                    contentType: contentType(transaction.request.headers)
                 )
 
                 if let response = transaction.response {
@@ -78,7 +83,8 @@
                     )
                     WindshieldBodySection(
                         title: "Response body",
-                        capture: response.body
+                        capture: response.body,
+                        contentType: contentType(response.headers)
                     )
                 } else {
                     Section("Response") {
@@ -123,6 +129,117 @@
             headers.first {
                 $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame
             }?.value
+        }
+    }
+
+    private struct WindshieldPerformanceSections: View {
+        let metrics: WindshieldNetworkMetrics
+
+        var body: some View {
+            Section("Performance") {
+                WindshieldMetadataRow(
+                    title: "URLSession task time",
+                    value: WindshieldDisplayFormatter.duration(metrics.taskDuration)
+                )
+                WindshieldMetadataRow(
+                    title: "Attempts",
+                    value: String(metrics.attempts.count)
+                )
+                WindshieldMetadataRow(
+                    title: "Redirects",
+                    value: String(metrics.redirectCount)
+                )
+            }
+
+            ForEach(Array(metrics.attempts.enumerated()), id: \.offset) { index, attempt in
+                Section("Network attempt \(index + 1)") {
+                    if let networkProtocolName = attempt.networkProtocolName {
+                        WindshieldMetadataRow(
+                            title: "Protocol",
+                            value: networkProtocolName
+                        )
+                    }
+                    WindshieldMetadataRow(
+                        title: "Source",
+                        value: fetchTypeLabel(attempt.fetchType)
+                    )
+                    WindshieldMetadataRow(
+                        title: "Connection",
+                        value: connectionLabel(attempt)
+                    )
+                    WindshieldMetadataRow(
+                        title: "Request headers on wire",
+                        value: WindshieldDisplayFormatter.byteCount(
+                            attempt.byteCounts.requestHeaderBytesSent
+                        )
+                    )
+                    WindshieldMetadataRow(
+                        title: "Request body",
+                        value: requestBodySize(attempt.byteCounts)
+                    )
+                    WindshieldMetadataRow(
+                        title: "Response headers on wire",
+                        value: WindshieldDisplayFormatter.byteCount(
+                            attempt.byteCounts.responseHeaderBytesReceived
+                        )
+                    )
+                    WindshieldMetadataRow(
+                        title: "Response body",
+                        value: responseBodySize(attempt.byteCounts)
+                    )
+                    WindshieldNetworkWaterfallView(
+                        attempt: attempt,
+                        taskDuration: metrics.taskDuration
+                    )
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+
+        private func fetchTypeLabel(
+            _ fetchType: WindshieldNetworkMetrics.FetchType
+        ) -> String {
+            switch fetchType {
+            case .unknown:
+                "Unknown"
+            case .networkLoad:
+                "Network"
+            case .serverPush:
+                "Server push"
+            case .localCache:
+                "Local cache"
+            }
+        }
+
+        private func connectionLabel(
+            _ attempt: WindshieldNetworkMetrics.Attempt
+        ) -> String {
+            var values: [String] = []
+            values.append(attempt.isReusedConnection ? "Reused" : "New")
+            if attempt.isProxyConnection {
+                values.append("Proxy")
+            }
+            return values.joined(separator: ", ")
+        }
+
+        private func requestBodySize(
+            _ counts: WindshieldNetworkMetrics.ByteCounts
+        ) -> String {
+            let wire = WindshieldDisplayFormatter.byteCount(counts.requestBodyBytesSent)
+            let original = WindshieldDisplayFormatter.byteCount(
+                counts.requestBodyBytesBeforeEncoding
+            )
+            return "\(wire) on wire · \(original) before encoding"
+        }
+
+        private func responseBodySize(
+            _ counts: WindshieldNetworkMetrics.ByteCounts
+        ) -> String {
+            let wire = WindshieldDisplayFormatter.byteCount(counts.responseBodyBytesReceived)
+            let decoded = WindshieldDisplayFormatter.byteCount(
+                counts.responseBodyBytesAfterDecoding
+            )
+            return "\(wire) on wire · \(decoded) delivered"
         }
     }
 
@@ -186,54 +303,7 @@
         }
     }
 
-    private struct WindshieldBodySection: View {
-        let title: String
-        let capture: WindshieldBodyCapture?
-        @State private var renderedBody = "Formatting body."
-        @State private var isFormatting = true
-
-        private var renderingToken: String {
-            guard let capture else {
-                return "waiting"
-            }
-
-            switch capture.contents {
-            case let .bytes(data):
-                return "bytes-\(data.count)-\(capture.totalByteCount ?? -1)"
-            case let .unavailable(reason):
-                return "unavailable-\(reason.rawValue)-\(capture.totalByteCount ?? -1)"
-            }
-        }
-
-        var body: some View {
-            Section {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    Text(renderedBody)
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } header: {
-                WindshieldCopyableSectionHeader(
-                    title: title,
-                    copyLabel: "Copy \(title.lowercased())",
-                    value: renderedBody,
-                    isEnabled: !isFormatting
-                )
-            }
-            .task(id: renderingToken) {
-                isFormatting = true
-                let capture = capture
-                renderedBody = await Task.detached(priority: .utility) {
-                    WindshieldBodyFormatter.format(capture)
-                }.value
-                isFormatting = false
-            }
-        }
-    }
-
-    private struct WindshieldCopyableSectionHeader: View {
+    struct WindshieldCopyableSectionHeader: View {
         let title: String
         let copyLabel: String
         let value: String

@@ -28,6 +28,10 @@
             }
         }
 
+        private var hostLatencySummaries: [WindshieldHostLatencySummary] {
+            WindshieldPerformanceSummary.slowestHosts(in: store.transactions)
+        }
+
         public var body: some View {
             NavigationView {
                 List {
@@ -35,6 +39,9 @@
                         .listRowSeparator(.hidden)
 
                     WindshieldFilterBar(selection: $selectedFilter)
+                        .listRowSeparator(.hidden)
+
+                    WindshieldHostLatencyView(summaries: hostLatencySummaries)
                         .listRowSeparator(.hidden)
 
                     if visibleTransactions.isEmpty {
@@ -110,11 +117,17 @@
                     message: "Failed requests and HTTP errors will appear here.",
                     systemImage: "checkmark.circle"
                 )
-            } else {
+            } else if selectedFilter == .active {
                 WindshieldEmptyState(
                     title: "No active requests",
                     message: "Requests in progress will appear here.",
                     systemImage: "clock"
+                )
+            } else {
+                WindshieldEmptyState(
+                    title: "No slow requests",
+                    message: "Completed requests taking at least one second will appear here.",
+                    systemImage: "timer"
                 )
             }
         }

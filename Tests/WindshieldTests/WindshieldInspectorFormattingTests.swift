@@ -53,127 +53,66 @@ import XCTest
             XCTAssertFalse(matches(active, filter: .active, searchText: "delete"))
         }
 
-        func testBodyFormatterPrettyPrintsJSONWithStableKeyOrder() {
-            let body = capture("{\"z\":2,\"a\":1}")
-
-            let result = WindshieldBodyFormatter.format(body)
-
-            XCTAssertTrue(result.contains("\"a\" : 1"))
-            XCTAssertTrue(result.contains("\"z\" : 2"))
-            XCTAssertLessThan(
-                try XCTUnwrap(result.range(of: "\"a\"")).lowerBound,
-                try XCTUnwrap(result.range(of: "\"z\"")).lowerBound
+        func testSlowFilterPrefersTaskMetricsAndFallsBackToTransactionDuration() {
+            let slowFromMetrics = transaction(
+                state: .completed,
+                duration: 0.2,
+                metricsDuration: 1.2
             )
+            let fastFromMetrics = transaction(
+                state: .completed,
+                duration: 2,
+                metricsDuration: 0.7
+            )
+            let slowWithoutMetrics = transaction(
+                state: .completed,
+                duration: 1.1
+            )
+            let active = transaction(
+                state: .inFlight,
+                metricsDuration: 3
+            )
+
+            XCTAssertTrue(matches(slowFromMetrics, filter: .slow))
+            XCTAssertFalse(matches(fastFromMetrics, filter: .slow))
+            XCTAssertTrue(matches(slowWithoutMetrics, filter: .slow))
+            XCTAssertFalse(matches(active, filter: .slow))
         }
 
-        func testBodyFormatterPrettyPrintsJSONArraysWithStableNestedKeyOrder() {
-            let body = capture("[{\"z\":2,\"a\":1},3]")
+        func testHostLatencySummaryUsesTerminalRequestsAndStableTopThreeOrdering() {
+            let transactions = [
+                transaction(host: "alpha.example", state: .completed, metricsDuration: 2),
+                transaction(host: "alpha.example", state: .completed, metricsDuration: 4),
+                transaction(host: "zeta.example", state: .completed, metricsDuration: 3),
+                transaction(host: "beta.example", state: .failed(
+                    WindshieldFailure(error: URLError(.timedOut))
+                ), metricsDuration: 2.5),
+                transaction(host: "gamma.example", state: .completed, metricsDuration: 1),
+                transaction(host: "ignored.example", state: .inFlight, metricsDuration: 99),
+            ]
 
-            let result = WindshieldBodyFormatter.format(body)
-
-            XCTAssertTrue(result.hasPrefix("[\n"))
-            XCTAssertLessThan(
-                try XCTUnwrap(result.range(of: "\"a\"")).lowerBound,
-                try XCTUnwrap(result.range(of: "\"z\"")).lowerBound
-            )
-            XCTAssertTrue(result.contains("  3"))
-        }
-
-        func testBodyFormatterPreservesValidJSONScalarsAsReadableText() {
-            XCTAssertEqual(WindshieldBodyFormatter.format(capture("42")), "42")
-            XCTAssertEqual(WindshieldBodyFormatter.format(capture("true")), "true")
-            XCTAssertEqual(
-                WindshieldBodyFormatter.format(capture("\"windshield\"")),
-                "\"windshield\""
-            )
-        }
-
-        func testBodyFormatterExplainsBinaryEmptyStreamedAndDiscardedBodies() {
-            XCTAssertEqual(
-                WindshieldBodyFormatter.format(capture("")),
-                "No body."
-            )
-            XCTAssertTrue(
-                WindshieldBodyFormatter.format(
-                    WindshieldBodyCapture(
-                        contents: .bytes(Data([0xFF, 0xD8, 0xFF])),
-                        totalByteCount: 3
-                    )
-                ).contains("Binary body")
-            )
-            XCTAssertTrue(
-                WindshieldBodyFormatter.format(
-                    .unavailable(.bodyStream, totalByteCount: 2048)
-                ).contains("Streamed request body")
-            )
-            XCTAssertTrue(
-                WindshieldBodyFormatter.format(
-                    .unavailable(.discardedByRetentionPolicy, totalByteCount: 4096)
-                ).contains("memory limit")
-            )
-        }
-
-        func testBodyFormatterReportsInvalidUTF8AsBinary() {
-            let body = WindshieldBodyCapture(
-                contents: .bytes(Data([0x66, 0x6F, 0x80])),
-                totalByteCount: 3
+            let summaries = WindshieldPerformanceSummary.slowestHosts(
+                in: transactions
             )
 
             XCTAssertEqual(
-                WindshieldBodyFormatter.format(body),
-                "Binary body, 3 bytes captured."
+                summaries.map(\.host),
+                ["alpha.example", "zeta.example", "beta.example"]
             )
+            XCTAssertEqual(summaries[0].sampleCount, 2)
+            XCTAssertEqual(summaries[0].averageDuration, 3, accuracy: 0.000_001)
+            XCTAssertEqual(summaries[0].maximumDuration, 4, accuracy: 0.000_001)
         }
 
-        func testBodyFormatterReportsCaptureAndDisplayLimits() {
-            let body = WindshieldBodyCapture(
-                contents: .bytes(Data("abcdefgh".utf8)),
-                totalByteCount: 16
+        func testHostLatencySummaryUsesHostnameForExactTimingTies() {
+            let summaries = WindshieldPerformanceSummary.slowestHosts(
+                in: [
+                    transaction(host: "zeta.example", state: .completed, metricsDuration: 2),
+                    transaction(host: "alpha.example", state: .completed, metricsDuration: 2),
+                ]
             )
 
-            let result = WindshieldBodyFormatter.format(body, displayByteLimit: 4)
-
-            XCTAssertTrue(result.hasPrefix("abcd"))
-            XCTAssertTrue(result.contains("Captured 8 bytes of 16 bytes"))
-            XCTAssertTrue(result.contains("Showing the first 4 bytes"))
-        }
-
-        func testBodyFormatterCompletesACharacterSplitByTheDisplayLimit() {
-            let body = capture("abc🙂tail")
-
-            let result = WindshieldBodyFormatter.format(body, displayByteLimit: 5)
-
-            XCTAssertTrue(result.hasPrefix("abc🙂"))
-            XCTAssertFalse(result.contains("Binary body"))
-            XCTAssertTrue(result.contains("Showing the first 7 bytes"))
-        }
-
-        func testBodyFormatterClampsNonpositiveDisplayLimitsToOneByte() {
-            let body = capture("abc")
-            let oneByteResult = WindshieldBodyFormatter.format(body, displayByteLimit: 1)
-
-            XCTAssertEqual(
-                WindshieldBodyFormatter.format(body, displayByteLimit: 0),
-                oneByteResult
-            )
-            XCTAssertEqual(
-                WindshieldBodyFormatter.format(body, displayByteLimit: -100),
-                oneByteResult
-            )
-            XCTAssertTrue(oneByteResult.hasPrefix("a"))
-            XCTAssertTrue(oneByteResult.contains("Showing the first 1 byte"))
-        }
-
-        func testBodyFormatterExplainsMetadataOnlyCapture() {
-            let body = WindshieldBodyCapture.unavailable(
-                .excludedByCapturePolicy,
-                totalByteCount: 4096
-            )
-
-            XCTAssertEqual(
-                WindshieldBodyFormatter.format(body),
-                "Body was not captured by the metadata-only policy. Size: 4 KB."
-            )
+            XCTAssertEqual(summaries.map(\.host), ["alpha.example", "zeta.example"])
         }
 
         func testRequestSnapshotDefaultsMethodAndSortsHeadersWithoutChangingValues() throws {
@@ -276,10 +215,13 @@ import XCTest
 
         private func transaction(
             method: String = "GET",
+            host: String = "api.example.com",
             statusCode: Int? = nil,
-            state: WindshieldTransactionState
+            state: WindshieldTransactionState,
+            duration: TimeInterval = 0,
+            metricsDuration: TimeInterval? = nil
         ) -> WindshieldTransaction {
-            var request = URLRequest(url: URL(string: "https://api.example.com/items")!)
+            var request = URLRequest(url: URL(string: "https://\(host)/items")!)
             request.httpMethod = method
 
             let response = statusCode.map {
@@ -293,6 +235,7 @@ import XCTest
                 )
             }
 
+            let startedAt = Date(timeIntervalSince1970: 1_000)
             return WindshieldTransaction(
                 id: UUID(),
                 request: WindshieldRequestSnapshot(
@@ -301,13 +244,24 @@ import XCTest
                 ),
                 response: response,
                 state: state,
-                startedAt: Date(),
-                endedAt: state == .inFlight ? nil : Date()
+                startedAt: startedAt,
+                endedAt: state == .inFlight
+                    ? nil
+                    : startedAt.addingTimeInterval(duration),
+                networkMetrics: metricsDuration.map(networkMetrics(duration:))
             )
         }
 
-        private func capture(_ text: String) -> WindshieldBodyCapture {
-            .capture(Data(text.utf8), maximumByteCount: 1024)
+        private func networkMetrics(
+            duration: TimeInterval
+        ) -> WindshieldNetworkMetrics {
+            let start = Date(timeIntervalSince1970: 2_000)
+            return WindshieldNetworkMetrics(
+                raw: .init(
+                    taskStartDate: start,
+                    taskEndDate: start.addingTimeInterval(duration)
+                )
+            )
         }
 
         private func streamedRequestSnapshot(contentLength: String) -> WindshieldRequestSnapshot {

@@ -79,6 +79,46 @@
         }
     }
 
+    struct WindshieldHostLatencyView: View {
+        let summaries: [WindshieldHostLatencySummary]
+
+        var body: some View {
+            if !summaries.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Slowest observed hosts")
+                        .font(.headline)
+
+                    ForEach(summaries) { summary in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(summary.host)
+                                .font(.caption.monospaced())
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: 8)
+                            Text(
+                                "avg \(WindshieldDisplayFormatter.duration(summary.averageDuration))"
+                            )
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                        }
+
+                        Text(
+                            "\(summary.sampleCount) observed · max "
+                                + WindshieldDisplayFormatter.duration(
+                                    summary.maximumDuration
+                                )
+                        )
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .monospacedDigit()
+                    }
+                }
+                .padding(.vertical, 6)
+                .accessibilityElement(children: .contain)
+            }
+        }
+    }
+
     struct WindshieldTransactionRow: View {
         let transaction: WindshieldTransaction
 
@@ -94,7 +134,7 @@
         private var footer: String {
             var values = [
                 WindshieldDisplayFormatter.time(transaction.startedAt),
-                WindshieldDisplayFormatter.duration(transaction.duration),
+                WindshieldDisplayFormatter.duration(transaction.observedDuration),
             ]
             if let byteCount = transaction.responseBodyByteCount {
                 values.append(WindshieldDisplayFormatter.byteCount(byteCount))
@@ -246,6 +286,117 @@
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .accessibilityElement(children: .combine)
+        }
+    }
+
+    struct WindshieldNetworkWaterfallView: View {
+        let attempt: WindshieldNetworkMetrics.Attempt
+        let taskDuration: TimeInterval?
+
+        private struct Phase: Identifiable {
+            enum Kind: String {
+                case dns = "DNS"
+                case connect = "Connect"
+                case tls = "TLS"
+                case request = "Request"
+                case waiting = "Waiting"
+                case response = "Response"
+
+                var color: Color {
+                    switch self {
+                    case .dns:
+                        .purple
+                    case .connect:
+                        .blue
+                    case .tls:
+                        .indigo
+                    case .request:
+                        .orange
+                    case .waiting:
+                        .pink
+                    case .response:
+                        .green
+                    }
+                }
+            }
+
+            let kind: Kind
+            let interval: WindshieldNetworkMetrics.Interval
+
+            var id: Kind {
+                kind
+            }
+        }
+
+        private var phases: [Phase] {
+            [
+                attempt.phases.dns.map { Phase(kind: .dns, interval: $0) },
+                attempt.phases.connect.map { Phase(kind: .connect, interval: $0) },
+                attempt.phases.tls.map { Phase(kind: .tls, interval: $0) },
+                attempt.phases.request.map { Phase(kind: .request, interval: $0) },
+                attempt.phases.waiting.map { Phase(kind: .waiting, interval: $0) },
+                attempt.phases.response.map { Phase(kind: .response, interval: $0) },
+            ].compactMap { $0 }
+        }
+
+        private var timelineDuration: TimeInterval {
+            max(
+                0.001,
+                taskDuration ?? phases.map(\.interval.endOffset).max() ?? 0.001
+            )
+        }
+
+        var body: some View {
+            if phases.isEmpty {
+                Text("Timing phases were not available for this attempt.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(phases) { phase in
+                        HStack(spacing: 8) {
+                            Text(phase.kind.rawValue)
+                                .font(.caption2)
+                                .frame(width: 56, alignment: .leading)
+
+                            GeometryReader { proxy in
+                                let start = min(
+                                    1,
+                                    max(0, phase.interval.startOffset / timelineDuration)
+                                )
+                                let length = min(
+                                    1 - start,
+                                    max(0, phase.interval.duration / timelineDuration)
+                                )
+
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(Color(.tertiarySystemFill))
+                                    Capsule()
+                                        .fill(phase.kind.color)
+                                        .frame(width: max(2, proxy.size.width * length))
+                                        .offset(x: proxy.size.width * start)
+                                }
+                            }
+                            .frame(height: 8)
+
+                            Text(
+                                WindshieldDisplayFormatter.duration(
+                                    phase.interval.duration
+                                )
+                            )
+                            .font(.caption2.monospacedDigit())
+                            .frame(width: 54, alignment: .trailing)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(
+                            "\(phase.kind.rawValue), starts at "
+                                + "\(WindshieldDisplayFormatter.duration(phase.interval.startOffset)), "
+                                + "duration \(WindshieldDisplayFormatter.duration(phase.interval.duration))"
+                        )
+                    }
+                }
+            }
         }
     }
 #endif
