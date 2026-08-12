@@ -16,17 +16,7 @@ The interception core also builds on macOS 12 for package tests and tooling. The
 ## Add the package
 
 Add the repository URL in Xcode under **File → Add Package Dependencies**.
-
-For a tagged release, a package manifest can use:
-
-```swift
-.package(
-    url: "https://github.com/initishbhatt/Windshield.git",
-    from: "0.3.0"
-)
-```
-
-During early development, you can point at `main` instead:
+Until `0.3.0` is tagged, select the `main` branch. A package manifest can use:
 
 ```swift
 .package(
@@ -35,12 +25,22 @@ During early development, you can point at `main` instead:
 )
 ```
 
+After the `0.3.0` tag is published, prefer a version-based dependency:
+
+```swift
+.package(
+    url: "https://github.com/initishbhatt/Windshield.git",
+    from: "0.3.0"
+)
+```
+
 Add `Windshield` to the application target. Keep setup and presentation code inside `#if DEBUG` because the implementation is intentionally excluded from Release builds.
 
 ## Minimal integration
 
-For apps whose sessions honor global `URLProtocol` registration, the complete
-Debug integration is one startup call and one root view modifier:
+The smallest Debug integration is one startup call and one root view modifier.
+This global setup is convenient when you do not control how every network
+session is created, but interception is best effort:
 
 ```swift
 import SwiftUI
@@ -75,9 +75,22 @@ a window-scoped presentation anchor; a deliberate three-finger, one-second hold
 then opens the inspector. This split avoids process-wide window lookup,
 first-responder takeover, and presenting over an existing host modal.
 
+If some requests do not appear, use the configuration-based setup below for the
+sessions your app creates. Calling the global `start()` repeatedly will not
+retrofit a session that already exists.
+
 ## Start interception
 
-For a session your app creates, instrument its configuration before creating the session. This is the reliable integration path. This form changes only the supplied configuration and does not register Windshield process-wide.
+Choose the setup based on who creates the network session:
+
+- If your app creates the `URLSessionConfiguration`, use the configuration-based
+  setup below. This is the reliable and recommended path.
+- If a framework creates the session, call the global `Windshield.start()` as
+  early as possible. Global interception remains best effort.
+
+For a session your app creates, instrument its configuration before creating the
+session. This changes only the supplied configuration and does not register
+Windshield process-wide.
 
 ```swift
 #if DEBUG
@@ -157,6 +170,20 @@ An app can support both entry points with one sheet state:
 #endif
 ```
 
+If your app already owns its sheet or navigation routing, it can present the
+inspector view directly instead of installing a Windshield presentation modifier:
+
+```swift
+#if DEBUG
+.sheet(isPresented: $isShowingWindshield) {
+    WindshieldInspectorView()
+}
+#endif
+```
+
+Use either the direct view or a Windshield presentation modifier for a given
+route so the app does not create two competing sheets.
+
 Capture continues while the inspector is closed. Opening it reads the current
 in-memory snapshot and then receives live updates; no push notification or
 external service populates the interface.
@@ -207,7 +234,9 @@ xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' buil
 
 ## Project status
 
-The current release is `0.3.0`. Windshield follows [Semantic Versioning](https://semver.org/). While the package is below `1.0.0`, its public API may evolve between minor releases.
+The next tagged release is `0.3.0`; its implementation is currently available
+from `main`. Windshield follows [Semantic Versioning](https://semver.org/). While
+the package is below `1.0.0`, its public API may evolve between minor releases.
 
 Persistence, export, redaction rules, and additional automatic presentation triggers are intentionally outside this release. See [CHANGELOG.md](CHANGELOG.md) for release details.
 
