@@ -16,42 +16,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
-
 jobs:
-  minimum-toolchain-build:
-    name: Xcode 15.0.1 compatibility
-    runs-on: macos-14
-    timeout-minutes: 15
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_15.0.1.app/Contents/Developer
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Report minimum toolchain
-        run: |
-          xcodebuild -version
-          swift -version
-
-      - name: Build package for iOS
-        run: |
-          xcodebuild \
-            -scheme Windshield \
-            -configuration Debug \
-            -destination "generic/platform=iOS Simulator" \
-            -derivedDataPath "$RUNNER_TEMP/WindshieldMinimumToolchain" \
-            CODE_SIGNING_ALLOWED=NO \
-            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
-            build
-
   strict-swift-tests:
     name: Strict Swift tests
-    runs-on: macos-15-intel
+    runs-on: macos-26
     timeout-minutes: 15
 
     steps:
@@ -73,7 +41,7 @@ jobs:
 
   thread-sanitizer:
     name: Thread Sanitizer
-    runs-on: macos-15-intel
+    runs-on: macos-26
     timeout-minutes: 20
     env:
       TSAN_OPTIONS: halt_on_error=1:report_thread_leaks=0
@@ -93,7 +61,7 @@ jobs:
 
   ios-consumer-builds:
     name: iOS package and demo builds
-    runs-on: macos-15-intel
+    runs-on: macos-26
     timeout-minutes: 25
 
     steps:
@@ -138,7 +106,7 @@ jobs:
 
   ios-ui-smoke:
     name: Demo UI smoke test
-    runs-on: macos-15-intel
+    runs-on: macos-26
     timeout-minutes: 20
 
     steps:
@@ -158,7 +126,7 @@ jobs:
           xcodebuild \
             -scheme Windshield \
             -configuration Debug \
-            -destination "platform=iOS Simulator,name=iPhone 16,OS=18.5" \
+            -destination "platform=iOS Simulator,name=iPhone 17,OS=latest" \
             -destination-timeout 120 \
             -derivedDataPath "$RUNNER_TEMP/WindshieldPresentationTests" \
             -resultBundlePath "$RUNNER_TEMP/WindshieldPresentationTests.xcresult" \
@@ -174,7 +142,7 @@ jobs:
             -project Examples/WindshieldDemo/WindshieldDemo.xcodeproj \
             -scheme WindshieldDemo \
             -configuration Debug \
-            -destination "platform=iOS Simulator,name=iPhone 16,OS=18.5" \
+            -destination "platform=iOS Simulator,name=iPhone 17,OS=latest" \
             -destination-timeout 120 \
             -derivedDataPath "$RUNNER_TEMP/WindshieldDemoUITests" \
             -resultBundlePath "$RUNNER_TEMP/WindshieldDemoUITests.xcresult" \

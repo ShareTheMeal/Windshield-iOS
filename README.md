@@ -8,7 +8,7 @@ Windshield keeps captured traffic in memory. It does not persist, upload, or pri
 
 - iOS 15 or later
 - Swift 5.9 or later
-- Xcode 15 or later
+- Xcode 26 or later
 - A Debug build
 
 The interception core also builds on macOS 12 for package tests and tooling. The built-in inspector interface is available only on iOS.
