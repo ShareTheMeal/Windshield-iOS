@@ -16,7 +16,7 @@ The interception core also builds on macOS 12 for package tests and tooling. The
 ## Add the package
 
 Add the repository URL in Xcode under **File → Add Package Dependencies**.
-Until `0.4.0` is tagged, select the `main` branch. A package manifest can use:
+Until `0.5.0` is tagged, select the `main` branch. A package manifest can use:
 
 ```swift
 .package(
@@ -25,12 +25,12 @@ Until `0.4.0` is tagged, select the `main` branch. A package manifest can use:
 )
 ```
 
-After the `0.4.0` tag is published, prefer a version-based dependency:
+After the `0.5.0` tag is published, prefer a version-based dependency:
 
 ```swift
 .package(
     url: "https://github.com/initishbhatt/Windshield.git",
-    from: "0.4.0"
+    from: "0.5.0"
 )
 ```
 
@@ -250,15 +250,86 @@ The inspector provides:
 
 - Live active, completed, failed, cancelled, and redirected requests
 - Search by method, URL, host, path, status, and error
-- All, Errors, and Active filters
+- All, Errors, Active, and Slow filters
 - Request and response headers
-- Pretty-printed JSON and readable text payloads
+- MIME-aware JSON, HTML source, XML, text, form, multipart-summary, and image views
+- Search and highlighted matches within captured textual request and response bodies
+- URLSession task timing, redirects, byte counts, per-attempt waterfalls, and slow-host summaries
 - Copy actions for URLs, headers, and bodies
 - Clear confirmation and useful empty states
 
+## Inspect payloads
+
+Windshield uses the captured `Content-Type` header to choose a safe body view:
+
+- JSON is pretty-printed with stable key ordering when its estimated expanded form stays within the display budget. Deep or highly compact JSON is shown as bounded source with a notice.
+- HTML and XML are displayed as source. Windshield never executes captured markup.
+- Plain text, JavaScript, GraphQL, and URL-encoded forms are readable and searchable.
+- Multipart forms show only part and file-part counts. Part values and filenames stay hidden.
+- Declared `image/*` bodies supported by ImageIO get a bounded, downsampled preview. Images with unsafe decoded dimensions are not rendered.
+- Unknown content falls back to JSON, then UTF-8 text, then an explicit binary summary.
+- If `Content-Type` itself is redacted, Windshield fails closed and hides the body preview instead of guessing its format.
+
+Text shown in the body viewer and data passed to custom decoders are capped at
+128 KiB. Search highlights at most the first 500 matches so a debug screen cannot
+become unresponsive. These display limits are separate from the 1 MiB capture
+limit described below.
+
+For an app-specific textual format, register a Debug-only decoder before opening
+the inspector:
+
+```swift
+#if DEBUG
+Windshield.registerPayloadDecoder(
+    .init(
+        id: "my-debug-format",
+        contentTypes: ["application/x-my-format"]
+    ) { input in
+        guard let text = MyDebugPayloadDecoder.decode(input.body) else {
+            return nil
+        }
+        return .init(text: text)
+    }
+)
+#endif
+```
+
+Matching uses exact, parameter-free MIME types and is case-insensitive. A decoder
+receives only a bounded copy of already-captured bytes plus the normalized MIME
+type; it receives no URL, headers, response, session, or live transport. Its
+text output is also bounded. Keep decoder work local and side-effect-free—do not
+upload, persist, or log the input—and return promptly because Windshield cannot
+force-cancel app-provided synchronous code. Remove a registration with
+`Windshield.removePayloadDecoder(id:)` when it is no longer needed. Multipart and
+image MIME types always use Windshield's built-in privacy and decode-safety paths
+and cannot be overridden by a custom decoder.
+
+## Read performance diagnostics
+
+For each intercepted task, Windshield displays the task duration and every
+available URL loading attempt. The compact waterfall can show DNS lookup,
+connection, TLS, request upload, waiting for the first response byte, and response
+transfer. It also distinguishes wire bytes from pre-encoding request bytes and
+post-decoding response bytes when Foundation reports them.
+
+The **Slow** filter includes terminal requests whose observed duration is at least
+one second. The traffic screen also shows up to three hosts with the highest
+average observed latency, including sample count and maximum duration.
+
+Some phase values are legitimately absent for cached responses, reused
+connections, redirects, and failed requests. These metrics describe Windshield's
+internal forwarding `URLSession`, not the originating session that invoked the
+custom protocol. See Apple's documentation for
+[`URLSessionTaskMetrics`](https://developer.apple.com/documentation/foundation/urlsessiontaskmetrics)
+and
+[`URLSessionTaskTransactionMetrics`](https://developer.apple.com/documentation/foundation/urlsessiontasktransactionmetrics).
+
 ## What is captured
 
-Windshield records the URL, HTTP method, redacted headers, timestamps, duration, response status, error details, and available request and response bodies. Ignored and metadata-only rules can reduce what reaches the in-memory store.
+Windshield records the URL, HTTP method, redacted headers, timestamps, response
+status, error details, available request and response bodies, and Foundation task
+metrics. Ignored and metadata-only rules can reduce what reaches the in-memory
+store.
 
 Each body is capped at 1 MiB. The store keeps at most 20 MiB of captured body data in total. When the total budget is reached, Windshield discards payload bytes from older completed requests while retaining their metadata. A large body is always forwarded to the app in full.
 
@@ -275,6 +346,8 @@ Windshield is designed for debug diagnostics, not production monitoring.
 - The forwarding session cannot reproduce every originating session policy. Apps using custom proxies, cookie stores, or custom protocol chains should validate their integration.
 - Authentication delegates, client certificates, certificate pinning, and custom server-trust decisions from the originating session are not forwarded. Windshield uses Foundation's default challenge handling. Preemptive `Authorization` headers are preserved on the network and redacted in the inspector. Do not intercept sessions that depend on custom authentication or trust callbacks.
 - Streamed request bodies are reported but not read.
+- HTML and XML bodies are source-only. Image previews accept only declared image MIME types and skip unsafe decoded dimensions.
+- Task metrics reflect Windshield's forwarding session. They may differ from timing observed outside the custom protocol, and Foundation may omit individual phases.
 - Attach the presentation modifier once per window. Windshield disables the gesture while VoiceOver is active. If another host or accessibility workflow uses three-finger long presses, use binding-based manual presentation instead.
 - URLs, query strings, nonstandard headers, and payloads may still contain credentials or personal data. Add app-specific redaction, ignore, or metadata-only rules, and never enable Windshield in production.
 
@@ -292,11 +365,14 @@ xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' buil
 
 ## Project status
 
-The next tagged release is `0.4.0`; its implementation is currently available
+The next tagged release is `0.5.0`; its implementation is currently available
 from `main`. Windshield follows [Semantic Versioning](https://semver.org/). While
 the package is below `1.0.0`, its public API may evolve between minor releases.
 
-Persistence, export, response rewriting, and additional automatic presentation triggers are intentionally outside this release. See [CHANGELOG.md](CHANGELOG.md) for release details.
+Persistence, export, replay, response rewriting, and additional automatic
+presentation triggers are intentionally outside this release. Windshield remains
+a read-only inspector: it never changes an app's request or response payload.
+See [CHANGELOG.md](CHANGELOG.md) for release details.
 
 ## License
 

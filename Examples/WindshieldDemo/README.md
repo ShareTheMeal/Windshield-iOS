@@ -19,4 +19,5 @@ builds with `#if DEBUG`.
 
 The `WindshieldDemo` scheme includes an XCUITest that starts a loopback HTTP
 fixture, makes a request through Windshield, opens the inspector, and verifies
-the captured response body. The test does not use the public internet.
+the recorded JSON body, in-body search, and task performance section. The test
+does not use the public internet.

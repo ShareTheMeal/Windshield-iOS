@@ -2,7 +2,39 @@
 
 Windshield follows [Semantic Versioning](https://semver.org/).
 
+## 0.5.0 - Unreleased
+
+### Added
+
+- MIME-aware body presentation for JSON, HTML source, XML, text, JavaScript, GraphQL, URL-encoded forms, multipart summaries, supported images, binary data, and unavailable bodies.
+- Unicode-safe, case-insensitive search and highlighting inside captured textual request and response bodies.
+- A bounded, ordered, thread-safe `Windshield.PayloadDecoder` extension point for app-specific textual formats.
+- Normalized `URLSessionTaskMetrics` capture for DNS, connection, TLS, request, first-byte waiting, response transfer, byte counts, fetch source, protocol, proxy use, connection reuse, attempts, and redirects.
+- A Slow filter, top-three host latency summaries, and compact per-attempt timing waterfalls.
+- Safe ImageIO thumbnail generation with decoded-dimension limits and background processing.
+
+### Changed
+
+- Traffic rows prefer the Foundation task duration when metrics are available.
+- Payload interpretation, custom decoding, body search, and image thumbnail work run away from the main actor and operate only on bounded snapshots.
+- iOS UI smoke coverage now verifies rich JSON presentation, body search, and performance diagnostics.
+
+### Safety
+
+- Windshield remains read-only. It does not replay traffic or rewrite request or response payloads.
+- HTML and XML are displayed only as source, multipart values and filenames are hidden, and oversized decoded images are not rendered.
+- JSON expansion is preflighted before parsing and formatting; payloads that could exceed the display budget remain bounded source.
+- Custom decoders receive no URL, headers, session, response object, or live transport and cannot alter host networking.
+- Redirect and cancellation lifecycles retain late task metrics without forwarding late response, data, or completion callbacks to the host client.
+
+### Deferred
+
+- Share/export and persistence remain future work. They were not pulled into this release.
+
 ## 0.4.0 - Unreleased
+
+This privacy milestone is already on `main` and will be included in `0.5.0`;
+no separate `0.4.0` tag was published.
 
 ### Added
 
