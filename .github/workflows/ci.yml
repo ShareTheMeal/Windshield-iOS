@@ -78,6 +78,7 @@ jobs:
             -destination "generic/platform=iOS Simulator" \
             -derivedDataPath "$RUNNER_TEMP/WindshieldPackage" \
             CODE_SIGNING_ALLOWED=NO \
+            ARCHS=arm64 \
             SWIFT_STRICT_CONCURRENCY=complete \
             SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
             build
@@ -91,6 +92,7 @@ jobs:
             -destination "generic/platform=iOS Simulator" \
             -derivedDataPath "$RUNNER_TEMP/WindshieldDemoDebug" \
             CODE_SIGNING_ALLOWED=NO \
+            ARCHS=arm64 \
             build
 
       - name: Build Release demo consumer
@@ -102,6 +104,7 @@ jobs:
             -destination "generic/platform=iOS Simulator" \
             -derivedDataPath "$RUNNER_TEMP/WindshieldDemoRelease" \
             CODE_SIGNING_ALLOWED=NO \
+            ARCHS=arm64 \
             build
 
   ios-ui-smoke:
@@ -132,6 +135,7 @@ jobs:
             -resultBundlePath "$RUNNER_TEMP/WindshieldPresentationTests.xcresult" \
             -only-testing:WindshieldTests/WindshieldInspectorPresentationTests \
             CODE_SIGNING_ALLOWED=NO \
+            ARCHS=arm64 \
             SWIFT_STRICT_CONCURRENCY=complete \
             SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
             test
@@ -147,6 +151,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/WindshieldDemoUITests" \
             -resultBundlePath "$RUNNER_TEMP/WindshieldDemoUITests.xcresult" \
             -only-testing:WindshieldDemoUITests/WindshieldDemoUITests/testCapturedRequestAppearsInInspectorWithResponseBody \
+            ARCHS=arm64 \
             test
 
       - name: Upload failed UI test result

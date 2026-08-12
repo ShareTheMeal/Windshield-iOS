@@ -14,7 +14,7 @@ Windshield follows [Semantic Versioning](https://semver.org/).
 
 - The demo now supports both the non-blocking gesture and its existing manual inspector button through one sheet state.
 - CI now runs the iOS-only presentation tests on a Simulator before the end-to-end demo smoke test.
-- CI now targets Xcode 26 or later on Apple-silicon GitHub-hosted runners; the historical Xcode 15 compatibility lane was removed.
+- CI now targets Xcode 26 or later and arm64-only Simulator builds on Apple-silicon GitHub-hosted runners; the historical Xcode 15 and Intel compatibility lanes were removed.
 
 ### Safety
 
