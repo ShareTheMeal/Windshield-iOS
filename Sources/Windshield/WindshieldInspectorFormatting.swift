@@ -111,6 +111,12 @@ import Foundation
                     return "Body was discarded to stay within Windshield's memory limit. Size: \(size)."
                 }
                 return "Body was discarded to stay within Windshield's memory limit."
+
+            case .excludedByCapturePolicy:
+                if let size {
+                    return "Body was not captured by the metadata-only policy. Size: \(size)."
+                }
+                return "Body was not captured by the metadata-only policy."
             }
         }
 

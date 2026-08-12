@@ -164,6 +164,18 @@ import XCTest
             XCTAssertTrue(oneByteResult.contains("Showing the first 1 byte"))
         }
 
+        func testBodyFormatterExplainsMetadataOnlyCapture() {
+            let body = WindshieldBodyCapture.unavailable(
+                .excludedByCapturePolicy,
+                totalByteCount: 4096
+            )
+
+            XCTAssertEqual(
+                WindshieldBodyFormatter.format(body),
+                "Body was not captured by the metadata-only policy. Size: 4 KB."
+            )
+        }
+
         func testRequestSnapshotDefaultsMethodAndSortsHeadersWithoutChangingValues() throws {
             var request = try URLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/items")))
             request.httpMethod = nil

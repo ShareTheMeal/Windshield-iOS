@@ -72,6 +72,200 @@ import XCTest
             )
         }
 
+        func testSensitiveAndCustomHeadersAreRedactedOnlyInRecordedSnapshots() throws {
+            var original = request(url: "https://api.example.com/private")
+            original.setValue("Bearer request-secret", forHTTPHeaderField: "Authorization")
+            original.setValue("custom-secret", forHTTPHeaderField: "X-API-Key")
+            original.setValue("visible", forHTTPHeaderField: "X-Public")
+            let context = makeContext(
+                request: original,
+                options: Windshield.Options(
+                    additionalRedactedHeaderNames: ["x-api-key"]
+                )
+            )
+
+            context.protocolInstance.startLoading()
+            let response = try httpResponse(
+                url: "https://api.example.com/private",
+                headers: [
+                    "Set-Cookie": "session=response-secret",
+                    "X-API-Key": "response-secret",
+                    "X-Public": "visible",
+                ]
+            )
+            context.transport.send(response)
+            context.transport.complete()
+
+            guard case let .started(_, requestSnapshot, _) = try XCTUnwrap(
+                context.recorder.events.first
+            ) else {
+                return XCTFail("Expected a started transaction event")
+            }
+            guard case let .receivedResponse(_, responseSnapshot) = context.recorder.events[1] else {
+                return XCTFail("Expected a response transaction event")
+            }
+
+            XCTAssertEqual(
+                headerValue("Authorization", in: requestSnapshot.headers),
+                WindshieldHeader.redactedValue
+            )
+            XCTAssertEqual(
+                headerValue("X-API-Key", in: requestSnapshot.headers),
+                WindshieldHeader.redactedValue
+            )
+            XCTAssertEqual(headerValue("X-Public", in: requestSnapshot.headers), "visible")
+            XCTAssertEqual(
+                headerValue("Set-Cookie", in: responseSnapshot.headers),
+                WindshieldHeader.redactedValue
+            )
+            XCTAssertEqual(
+                headerValue("X-API-Key", in: responseSnapshot.headers),
+                WindshieldHeader.redactedValue
+            )
+            XCTAssertEqual(headerValue("X-Public", in: responseSnapshot.headers), "visible")
+
+            XCTAssertEqual(
+                context.transport.request?.value(forHTTPHeaderField: "Authorization"),
+                "Bearer request-secret"
+            )
+            XCTAssertEqual(
+                context.transport.request?.value(forHTTPHeaderField: "X-API-Key"),
+                "custom-secret"
+            )
+            XCTAssertTrue(context.client.receivedResponse === response)
+            XCTAssertEqual(
+                response.value(forHTTPHeaderField: "Set-Cookie"),
+                "session=response-secret"
+            )
+            XCTAssertEqual(context.client.eventNames, ["response", "finish"])
+        }
+
+        func testIgnoredRequestUsesTheNormalTransportWithoutRecordingAnything() throws {
+            var original = request(url: "https://api.example.com/private/items")
+            original.httpMethod = "POST"
+            original.httpBody = Data("sensitive request".utf8)
+            original.setValue("Bearer network-value", forHTTPHeaderField: "Authorization")
+            let context = makeContext(
+                request: original,
+                options: Windshield.Options(
+                    ignoredURLRules: [
+                        .init(
+                            host: "api.example.com",
+                            pathPrefix: "/private",
+                            httpMethods: ["POST"]
+                        ),
+                    ]
+                )
+            )
+
+            context.protocolInstance.startLoading()
+            let response = try httpResponse(url: "https://api.example.com/private/items")
+            let payload = Data("sensitive response".utf8)
+            context.transport.send(response)
+            context.transport.send(payload)
+            context.transport.complete()
+
+            XCTAssertTrue(context.recorder.events.isEmpty)
+            XCTAssertEqual(context.transport.makeTaskCallCount, 1)
+            XCTAssertEqual(context.transport.task.resumeCallCount, 1)
+            XCTAssertEqual(context.transport.request?.httpMethod, original.httpMethod)
+            XCTAssertEqual(context.transport.request?.httpBody, original.httpBody)
+            XCTAssertEqual(
+                context.transport.request?.value(forHTTPHeaderField: "Authorization"),
+                "Bearer network-value"
+            )
+            XCTAssertTrue(context.client.receivedResponse === response)
+            XCTAssertEqual(context.client.loadedData, payload)
+            XCTAssertEqual(context.client.eventNames, ["response", "data", "finish"])
+        }
+
+        func testMetadataOnlyPlanIsStableAndForwardsEveryPayloadByte() throws {
+            var original = request(url: "https://api.example.com/payments/confirm")
+            original.httpMethod = "POST"
+            let requestPayload = Data("sensitive request".utf8)
+            original.httpBody = requestPayload
+            let context = makeContext(
+                request: original,
+                options: Windshield.Options(
+                    metadataOnlyURLRules: [
+                        .init(
+                            host: "api.example.com",
+                            pathPrefix: "/payments",
+                            httpMethods: ["POST"]
+                        ),
+                    ]
+                )
+            )
+
+            context.protocolInstance.startLoading()
+            context.policyStore.configure(options: Windshield.Options())
+
+            let response = try httpResponse(
+                url: "https://api.example.com/payments/confirm",
+                headers: ["Set-Cookie": "session=response-secret"]
+            )
+            let firstChunk = Data("sensitive ".utf8)
+            let secondChunk = Data("response".utf8)
+            context.transport.send(response)
+            context.transport.send(firstChunk)
+            context.transport.send(secondChunk)
+            context.transport.complete()
+
+            guard case let .started(_, requestSnapshot, _) = try XCTUnwrap(
+                context.recorder.events.first
+            ) else {
+                return XCTFail("Expected a started transaction event")
+            }
+            guard case let .receivedResponse(_, responseSnapshot) = context.recorder.events[1] else {
+                return XCTFail("Expected a response transaction event")
+            }
+            guard case let .completed(_, body, _) = try XCTUnwrap(
+                context.recorder.events.last
+            ) else {
+                return XCTFail("Expected a completed transaction event")
+            }
+
+            XCTAssertEqual(
+                requestSnapshot.body.contents,
+                .unavailable(.excludedByCapturePolicy)
+            )
+            XCTAssertEqual(requestSnapshot.body.totalByteCount, requestPayload.count)
+            XCTAssertEqual(
+                responseSnapshot.headers.first {
+                    $0.name.caseInsensitiveCompare("Set-Cookie") == .orderedSame
+                }?.value,
+                WindshieldHeader.redactedValue
+            )
+            XCTAssertEqual(body.contents, .unavailable(.excludedByCapturePolicy))
+            XCTAssertEqual(body.totalByteCount, firstChunk.count + secondChunk.count)
+            XCTAssertEqual(context.transport.request?.httpBody, requestPayload)
+            XCTAssertEqual(context.client.loadedData, firstChunk + secondChunk)
+            XCTAssertEqual(context.client.eventNames, ["response", "data", "data", "finish"])
+        }
+
+        func testMetadataOnlyCancellationKeepsTheReceivedByteCount() {
+            let context = makeContext(
+                request: request(url: "https://api.example.com/private"),
+                options: Windshield.Options(
+                    metadataOnlyURLRules: [
+                        .init(host: "api.example.com", pathPrefix: "/private"),
+                    ]
+                )
+            )
+            let partialBody = Data("partial response".utf8)
+
+            context.protocolInstance.startLoading()
+            context.transport.send(partialBody)
+            context.protocolInstance.stopLoading()
+
+            guard case let .cancelled(_, body, _) = context.recorder.events.last else {
+                return XCTFail("Expected a cancelled transaction event")
+            }
+            XCTAssertEqual(body.contents, .unavailable(.excludedByCapturePolicy))
+            XCTAssertEqual(body.totalByteCount, partialBody.count)
+            XCTAssertEqual(context.client.loadedData, partialBody)
+        }
+
         func testRepeatedStartLoadingCreatesOneTransportTaskAndOneTransaction() {
             let context = makeContext(request: request(url: "https://example.com/items"))
 
@@ -655,10 +849,62 @@ import XCTest
             await recorder.flush()
         }
 
-        private func makeContext(request: URLRequest) -> TestContext {
+        func testPublicIgnoredHostStillCompletesWithoutCreatingAStoreRow() async throws {
+            let recorder = WindshieldTransactionRecorder.shared
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+
+            let responseBody = Data("network response".utf8)
+            let server = try LoopbackHTTPServer(responseBody: responseBody)
+            let port = try server.start()
+            defer { server.stop() }
+
+            let configuration = URLSessionConfiguration.ephemeral
+            Windshield.start(
+                intercepting: configuration,
+                options: Windshield.Options(ignoredHosts: ["127.0.0.1"])
+            )
+            defer {
+                WindshieldCapturePolicyStore.shared.configure(options: Windshield.Options())
+            }
+            let session = URLSession(configuration: configuration)
+            defer { session.invalidateAndCancel() }
+
+            var outgoingRequest = request(
+                url: "http://127.0.0.1:\(port.rawValue)/ignored"
+            )
+            outgoingRequest.httpMethod = "POST"
+            outgoingRequest.httpBody = Data("network request".utf8)
+
+            let (data, response) = try await session.data(for: outgoingRequest)
+
+            XCTAssertEqual(data, responseBody)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            XCTAssertTrue(server.receivedRequest.contains("POST /ignored"))
+            XCTAssertTrue(server.receivedRequest.contains("network request"))
+
+            await recorder.flush()
+            let transactions = await MainActor.run {
+                WindshieldStore.shared.transactions
+            }
+            XCTAssertTrue(transactions.isEmpty)
+
+            await MainActor.run {
+                WindshieldStore.shared.clear()
+            }
+            await recorder.flush()
+        }
+
+        private func makeContext(
+            request: URLRequest,
+            options: Windshield.Options = Windshield.Options()
+        ) -> TestContext {
             let client = URLProtocolClientSpy()
             let transport = WindshieldTransportSpy()
             let recorder = WindshieldRecorderSpy()
+            let policyStore = WindshieldCapturePolicyStore(options: options)
             let protocolInstance = WindshieldURLProtocol(
                 request: request,
                 cachedResponse: nil,
@@ -666,13 +912,24 @@ import XCTest
             )
             protocolInstance.transport = transport
             protocolInstance.recorder = recorder
+            protocolInstance.capturePolicyProvider = policyStore
 
             return TestContext(
                 protocolInstance: protocolInstance,
                 client: client,
                 transport: transport,
-                recorder: recorder
+                recorder: recorder,
+                policyStore: policyStore
             )
+        }
+
+        private func headerValue(
+            _ name: String,
+            in headers: [WindshieldHeader]
+        ) -> String? {
+            headers.first {
+                $0.name.caseInsensitiveCompare(name) == .orderedSame
+            }?.value
         }
 
         private func request(url: String) -> URLRequest {
@@ -700,6 +957,7 @@ import XCTest
         let client: URLProtocolClientSpy
         let transport: WindshieldTransportSpy
         let recorder: WindshieldRecorderSpy
+        let policyStore: WindshieldCapturePolicyStore
     }
 
     private final class WindshieldTransportSpy: WindshieldTransporting {
@@ -765,6 +1023,7 @@ import XCTest
         private(set) var loadedData = Data()
         private(set) var error: Error?
         private(set) var redirectedRequest: URLRequest?
+        private(set) var receivedResponse: URLResponse?
         var dataHandler: ((Data) -> Void)?
 
         func urlProtocol(
@@ -783,10 +1042,11 @@ import XCTest
 
         func urlProtocol(
             _: URLProtocol,
-            didReceive _: URLResponse,
+            didReceive response: URLResponse,
             cacheStoragePolicy _: URLCache.StoragePolicy
         ) {
             eventNames.append("response")
+            receivedResponse = response
         }
 
         func urlProtocol(_: URLProtocol, didLoad data: Data) {

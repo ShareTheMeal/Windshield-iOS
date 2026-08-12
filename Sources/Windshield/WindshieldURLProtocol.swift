@@ -30,9 +30,12 @@ import Foundation
         private var capturedResponseBody = Data()
         private var receivedResponseBodyByteCount = 0
         private var transportTask: WindshieldTransportTask?
+        private var capturePlan: WindshieldCapturePlan?
 
         var transport: WindshieldTransporting = WindshieldURLSessionTransport.shared
         var recorder: WindshieldRecording = WindshieldTransactionRecorder.shared
+        var capturePolicyProvider: WindshieldCapturePolicyProviding =
+            WindshieldCapturePolicyStore.shared
 
         override class func canInit(with request: URLRequest) -> Bool {
             guard URLProtocol.property(forKey: handledRequestKey, in: request) == nil else {
@@ -56,13 +59,17 @@ import Foundation
                     return
                 }
                 state = .loading
+                let capturePlan = capturePolicyProvider.capturePlan(for: request)
+                self.capturePlan = capturePlan
 
-                recorder.record(
+                recordIfEnabled(
                     .started(
                         id: transactionID,
                         request: WindshieldRequestSnapshot(
                             request: request,
-                            maximumBodyByteCount: Self.maximumCapturedRequestBodySize
+                            maximumBodyByteCount: Self.maximumCapturedRequestBodySize,
+                            bodyCapture: capturePlan.bodyCapture,
+                            redactedHeaderNames: capturePlan.redactedHeaderNames
                         ),
                         at: Date()
                     )
@@ -97,6 +104,7 @@ import Foundation
                 }
 
                 let shouldRecordCancellation = state == .loading
+                    && capturePlan?.recordsTransaction == true
                 state = .terminated
 
                 let cancellation = Cancellation(
@@ -158,7 +166,7 @@ import Foundation
                 return
             }
 
-            recorder.record(
+            recordIfEnabled(
                 .failed(
                     id: transactionID,
                     body: capturedBodySnapshot(),
@@ -180,11 +188,28 @@ import Foundation
         }
 
         private func capturedBodySnapshot() -> WindshieldBodyCapture {
-            .capture(
+            if capturePlan?.bodyCapture == .metadataOnly {
+                return .unavailable(
+                    .excludedByCapturePolicy,
+                    totalByteCount: receivedResponseBodyByteCount
+                )
+            }
+
+            return .capture(
                 capturedResponseBody,
                 totalByteCount: receivedResponseBodyByteCount,
                 maximumByteCount: Self.maximumCapturedResponseBodySize
             )
+        }
+
+        private func recordIfEnabled(
+            _ event: @autoclosure () -> WindshieldTransactionEvent
+        ) {
+            guard capturePlan?.recordsTransaction == true else {
+                return
+            }
+
+            recorder.record(event())
         }
     }
 
@@ -196,10 +221,13 @@ import Foundation
                 }
 
                 if let response = response as? HTTPURLResponse {
-                    recorder.record(
+                    recordIfEnabled(
                         .receivedResponse(
                             id: transactionID,
-                            response: WindshieldResponseSnapshot(response: response)
+                            response: WindshieldResponseSnapshot(
+                                response: response,
+                                redactedHeaderNames: capturePlan?.redactedHeaderNames ?? []
+                            )
                         )
                     )
                 }
@@ -213,14 +241,18 @@ import Foundation
                     return
                 }
 
-                receivedResponseBodyByteCount += data.count
+                if capturePlan?.recordsTransaction == true {
+                    receivedResponseBodyByteCount += data.count
 
-                let remainingCapacity = max(
-                    0,
-                    Self.maximumCapturedResponseBodySize - capturedResponseBody.count
-                )
-                if remainingCapacity > 0 {
-                    capturedResponseBody.append(contentsOf: data.prefix(remainingCapacity))
+                    if capturePlan?.bodyCapture == .full {
+                        let remainingCapacity = max(
+                            0,
+                            Self.maximumCapturedResponseBodySize - capturedResponseBody.count
+                        )
+                        if remainingCapacity > 0 {
+                            capturedResponseBody.append(contentsOf: data.prefix(remainingCapacity))
+                        }
+                    }
                 }
 
                 client?.urlProtocol(self, didLoad: data)
@@ -234,7 +266,7 @@ import Foundation
                 }
 
                 if let error {
-                    recorder.record(
+                    recordIfEnabled(
                         .failed(
                             id: transactionID,
                             body: capturedBodySnapshot(),
@@ -244,7 +276,7 @@ import Foundation
                     )
                     client?.urlProtocol(self, didFailWithError: error)
                 } else {
-                    recorder.record(
+                    recordIfEnabled(
                         .completed(
                             id: transactionID,
                             body: capturedBodySnapshot(),
@@ -262,10 +294,13 @@ import Foundation
                     return
                 }
 
-                recorder.record(
+                recordIfEnabled(
                     .redirected(
                         id: transactionID,
-                        response: WindshieldResponseSnapshot(response: response),
+                        response: WindshieldResponseSnapshot(
+                            response: response,
+                            redactedHeaderNames: capturePlan?.redactedHeaderNames ?? []
+                        ),
                         body: capturedBodySnapshot(),
                         destination: request.url,
                         at: Date()

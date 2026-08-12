@@ -179,6 +179,7 @@ import XCTest
         }
 
         func testConfiguredInterceptorPreservesPreemptiveAuthorization() async throws {
+            WindshieldCapturePolicyStore.shared.configure(options: Windshield.Options())
             let recorder = WindshieldTransactionRecorder.shared
             await MainActor.run {
                 WindshieldStore.shared.clear()
@@ -231,7 +232,7 @@ import XCTest
             XCTAssertTrue(
                 transactions.first?.request.headers.contains {
                     $0.name.caseInsensitiveCompare("Authorization") == .orderedSame
-                        && $0.value == "Basic \(credentials)"
+                        && $0.value == WindshieldHeader.redactedValue
                 } == true
             )
 

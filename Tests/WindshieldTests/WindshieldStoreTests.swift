@@ -266,6 +266,109 @@ import XCTest
             XCTAssertEqual(streamed.body.totalByteCount, 6)
         }
 
+        func testSnapshotsRedactConfiguredHeadersWithoutMutatingNetworkValues() throws {
+            var request = try URLRequest(
+                url: XCTUnwrap(URL(string: "https://example.com/private"))
+            )
+            request.setValue("Bearer request-secret", forHTTPHeaderField: "Authorization")
+            request.setValue("visible", forHTTPHeaderField: "X-Public")
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: [
+                        "Set-Cookie": "session=response-secret",
+                        "X-Public": "visible",
+                    ]
+                )
+            )
+            let redactedNames: Set = ["authorization", "set-cookie"]
+
+            let requestSnapshot = WindshieldRequestSnapshot(
+                request: request,
+                maximumBodyByteCount: 1024,
+                redactedHeaderNames: redactedNames
+            )
+            let responseSnapshot = WindshieldResponseSnapshot(
+                response: response,
+                redactedHeaderNames: redactedNames
+            )
+
+            XCTAssertEqual(
+                requestSnapshot.headers.first {
+                    $0.name.caseInsensitiveCompare("Authorization") == .orderedSame
+                }?.value,
+                WindshieldHeader.redactedValue
+            )
+            XCTAssertEqual(
+                responseSnapshot.headers.first {
+                    $0.name.caseInsensitiveCompare("Set-Cookie") == .orderedSame
+                }?.value,
+                WindshieldHeader.redactedValue
+            )
+            XCTAssertTrue(
+                requestSnapshot.headers.contains(
+                    WindshieldHeader(name: "X-Public", value: "visible")
+                )
+            )
+            XCTAssertTrue(
+                responseSnapshot.headers.contains {
+                    $0.name.caseInsensitiveCompare("X-Public") == .orderedSame
+                        && $0.value == "visible"
+                }
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"),
+                "Bearer request-secret"
+            )
+            XCTAssertEqual(
+                response.value(forHTTPHeaderField: "Set-Cookie"),
+                "session=response-secret"
+            )
+        }
+
+        func testMetadataOnlyRequestSnapshotKeepsKnownLengthWithoutCopyingBody() throws {
+            var request = try URLRequest(
+                url: XCTUnwrap(URL(string: "https://example.com/private"))
+            )
+            let payload = Data("sensitive payload".utf8)
+            request.httpBody = payload
+
+            let snapshot = WindshieldRequestSnapshot(
+                request: request,
+                maximumBodyByteCount: 1024,
+                bodyCapture: .metadataOnly
+            )
+
+            XCTAssertEqual(snapshot.body.contents, .unavailable(.excludedByCapturePolicy))
+            XCTAssertEqual(snapshot.body.totalByteCount, payload.count)
+            XCTAssertEqual(request.httpBody, payload)
+
+            var streamedRequest = try URLRequest(
+                url: XCTUnwrap(URL(string: "https://example.com/upload"))
+            )
+            let stream = InputStream(data: payload)
+            streamedRequest.httpBodyStream = stream
+            streamedRequest.setValue(
+                String(payload.count),
+                forHTTPHeaderField: "Content-Length"
+            )
+
+            let streamedSnapshot = WindshieldRequestSnapshot(
+                request: streamedRequest,
+                maximumBodyByteCount: 1024,
+                bodyCapture: .metadataOnly
+            )
+
+            XCTAssertEqual(
+                streamedSnapshot.body.contents,
+                .unavailable(.excludedByCapturePolicy)
+            )
+            XCTAssertEqual(streamedSnapshot.body.totalByteCount, payload.count)
+            XCTAssertEqual(stream.streamStatus, .notOpen)
+        }
+
         func testRecorderPublishesReducedTransactionsOnTheMainActor() async {
             let recorder = WindshieldTransactionRecorder.shared
             await MainActor.run {

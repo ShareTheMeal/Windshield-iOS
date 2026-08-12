@@ -2,6 +2,8 @@ import Foundation
 
 #if DEBUG
     struct WindshieldHeader: Equatable {
+        static let redactedValue = "<redacted>"
+
         let name: String
         let value: String
     }
@@ -15,6 +17,7 @@ import Foundation
         enum UnavailableReason: String, Equatable {
             case bodyStream
             case discardedByRetentionPolicy
+            case excludedByCapturePolicy
         }
 
         var contents: Contents
@@ -65,12 +68,25 @@ import Foundation
         let method: String
         let headers: [WindshieldHeader]
 
-        init(request: URLRequest, maximumBodyByteCount: Int) {
+        init(
+            request: URLRequest,
+            maximumBodyByteCount: Int,
+            bodyCapture: WindshieldCapturePlan.BodyCapture = .full,
+            redactedHeaderNames: Set<String> = []
+        ) {
             url = request.url
             method = request.httpMethod ?? "GET"
-            headers = Self.sortedHeaders(request.allHTTPHeaderFields ?? [:])
+            headers = Self.sortedHeaders(
+                request.allHTTPHeaderFields ?? [:],
+                redactedHeaderNames: redactedHeaderNames
+            )
 
-            if let data = request.httpBody {
+            if bodyCapture == .metadataOnly {
+                body = .unavailable(
+                    .excludedByCapturePolicy,
+                    totalByteCount: Self.bodyByteCount(from: request)
+                )
+            } else if let data = request.httpBody {
                 body = .capture(data, maximumByteCount: maximumBodyByteCount)
             } else if request.httpBodyStream != nil {
                 body = .unavailable(
@@ -83,10 +99,18 @@ import Foundation
         }
 
         private static func sortedHeaders(
-            _ headers: [String: String]
+            _ headers: [String: String],
+            redactedHeaderNames: Set<String>
         ) -> [WindshieldHeader] {
             headers
-                .map(WindshieldHeader.init)
+                .map { name, value in
+                    WindshieldHeader(
+                        name: name,
+                        value: redactedHeaderNames.contains(
+                            WindshieldPolicyNormalization.headerName(name)
+                        ) ? WindshieldHeader.redactedValue : value
+                    )
+                }
                 .sorted {
                     $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
                 }
@@ -103,6 +127,18 @@ import Foundation
 
             return length
         }
+
+        private static func bodyByteCount(from request: URLRequest) -> Int? {
+            if let body = request.httpBody {
+                return body.count
+            }
+
+            if request.httpBodyStream != nil {
+                return contentLength(from: request)
+            }
+
+            return 0
+        }
     }
 
     struct WindshieldResponseSnapshot: Equatable {
@@ -112,7 +148,10 @@ import Foundation
         let headers: [WindshieldHeader]
         let expectedBodyByteCount: Int?
 
-        init(response: HTTPURLResponse) {
+        init(
+            response: HTTPURLResponse,
+            redactedHeaderNames: Set<String> = []
+        ) {
             body = nil
             url = response.url
             statusCode = response.statusCode
@@ -120,7 +159,11 @@ import Foundation
                 .map {
                     WindshieldHeader(
                         name: String(describing: $0.key),
-                        value: String(describing: $0.value)
+                        value: redactedHeaderNames.contains(
+                            WindshieldPolicyNormalization.headerName(String(describing: $0.key))
+                        )
+                            ? WindshieldHeader.redactedValue
+                            : String(describing: $0.value)
                     )
                 }
                 .sorted {
