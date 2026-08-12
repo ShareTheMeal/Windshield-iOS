@@ -259,6 +259,17 @@ import Foundation
             }
         }
 
+        func transportDidCollect(_ metrics: WindshieldNetworkMetrics) {
+            lifecycle.sync {
+                recordIfEnabled(
+                    .receivedNetworkMetrics(
+                        id: transactionID,
+                        metrics: metrics
+                    )
+                )
+            }
+        }
+
         func transportDidComplete(with error: Error?) {
             lifecycle.sync {
                 guard transitionToTerminated() else {

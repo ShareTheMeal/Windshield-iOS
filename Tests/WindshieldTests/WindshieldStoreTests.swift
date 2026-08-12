@@ -96,6 +96,70 @@ import XCTest
             XCTAssertEqual(reducer.transactions[0].state, .redirected(to: destination))
         }
 
+        func testMetricsAttachBeforeOrAfterTerminationAndDuplicatesAreIgnored() {
+            let beforeCompletionID = UUID()
+            let afterCompletionID = UUID()
+            let metrics = networkMetrics(duration: 0.75)
+            var reducer = WindshieldTransactionReducer()
+
+            reducer.reduce(
+                .started(id: beforeCompletionID, request: request(), at: Date())
+            )
+            XCTAssertTrue(
+                reducer.reduce(
+                    .receivedNetworkMetrics(
+                        id: beforeCompletionID,
+                        metrics: metrics
+                    )
+                )
+            )
+            reducer.reduce(
+                .completed(
+                    id: beforeCompletionID,
+                    body: body("complete"),
+                    at: Date()
+                )
+            )
+
+            reducer.reduce(
+                .started(id: afterCompletionID, request: request(), at: Date())
+            )
+            reducer.reduce(
+                .completed(
+                    id: afterCompletionID,
+                    body: body("complete"),
+                    at: Date()
+                )
+            )
+            XCTAssertTrue(
+                reducer.reduce(
+                    .receivedNetworkMetrics(
+                        id: afterCompletionID,
+                        metrics: metrics
+                    )
+                )
+            )
+            XCTAssertFalse(
+                reducer.reduce(
+                    .receivedNetworkMetrics(
+                        id: afterCompletionID,
+                        metrics: networkMetrics(duration: 5)
+                    )
+                )
+            )
+            XCTAssertFalse(
+                reducer.reduce(
+                    .receivedNetworkMetrics(id: UUID(), metrics: metrics)
+                )
+            )
+
+            XCTAssertTrue(
+                reducer.transactions.allSatisfy {
+                    $0.state == .completed && $0.networkMetrics == metrics
+                }
+            )
+        }
+
         func testTransactionRetentionRemovesTheOldestTerminalRowBeforeAnActiveRow() {
             let activeID = UUID()
             let completedID = UUID()
@@ -508,6 +572,16 @@ import XCTest
             await recorder.flush()
 
             let ids = (0 ..< 64).map { _ in UUID() }
+            let metrics = ids.indices.map { index in
+                let start = Date(timeIntervalSince1970: TimeInterval(index))
+                return WindshieldNetworkMetrics(
+                    raw: .init(
+                        taskStartDate: start,
+                        taskEndDate: start.addingTimeInterval(0.25),
+                        attempts: []
+                    )
+                )
+            }
             DispatchQueue.concurrentPerform(iterations: ids.count) { index in
                 let id = ids[index]
                 let startedAt = Date(timeIntervalSince1970: TimeInterval(index))
@@ -541,6 +615,12 @@ import XCTest
                         at: startedAt.addingTimeInterval(1)
                     )
                 )
+                recorder.record(
+                    .receivedNetworkMetrics(
+                        id: id,
+                        metrics: metrics[index]
+                    )
+                )
             }
             await recorder.flush()
 
@@ -551,6 +631,7 @@ import XCTest
             XCTAssertEqual(Set(transactions.map(\.id)), Set(ids))
             XCTAssertTrue(transactions.allSatisfy { $0.state == .completed })
             XCTAssertTrue(transactions.allSatisfy { $0.response?.statusCode == 200 })
+            XCTAssertTrue(transactions.allSatisfy { $0.networkMetrics != nil })
             XCTAssertTrue(
                 transactions.allSatisfy { ($0.response?.body?.capturedByteCount ?? 0) > 0 }
             )
@@ -620,6 +701,17 @@ import XCTest
 
         private func body(_ text: String) -> WindshieldBodyCapture {
             .capture(Data(text.utf8), maximumByteCount: 1024)
+        }
+
+        private func networkMetrics(duration: TimeInterval) -> WindshieldNetworkMetrics {
+            let start = Date(timeIntervalSince1970: 100)
+            return WindshieldNetworkMetrics(
+                raw: .init(
+                    taskStartDate: start,
+                    taskEndDate: start.addingTimeInterval(duration),
+                    attempts: []
+                )
+            )
         }
     }
 #endif

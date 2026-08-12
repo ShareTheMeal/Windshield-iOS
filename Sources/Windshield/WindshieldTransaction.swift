@@ -207,6 +207,25 @@ import Foundation
         var state: WindshieldTransactionState
         let startedAt: Date
         var endedAt: Date?
+        var networkMetrics: WindshieldNetworkMetrics?
+
+        init(
+            id: UUID,
+            request: WindshieldRequestSnapshot,
+            response: WindshieldResponseSnapshot?,
+            state: WindshieldTransactionState,
+            startedAt: Date,
+            endedAt: Date?,
+            networkMetrics: WindshieldNetworkMetrics? = nil
+        ) {
+            self.id = id
+            self.request = request
+            self.response = response
+            self.state = state
+            self.startedAt = startedAt
+            self.endedAt = endedAt
+            self.networkMetrics = networkMetrics
+        }
 
         var duration: TimeInterval? {
             guard let endedAt else {
@@ -242,6 +261,10 @@ import Foundation
         case receivedResponse(
             id: UUID,
             response: WindshieldResponseSnapshot
+        )
+        case receivedNetworkMetrics(
+            id: UUID,
+            metrics: WindshieldNetworkMetrics
         )
         case completed(
             id: UUID,

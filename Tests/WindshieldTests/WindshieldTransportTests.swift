@@ -36,7 +36,10 @@ import XCTest
             wait(for: [unexpectedCompletion], timeout: 0.2)
             XCTAssertEqual(observer.redirectResponse?.statusCode, 302)
             XCTAssertEqual(observer.redirectRequest?.url?.path, "/final")
-            XCTAssertEqual(observer.eventNames, ["redirect"])
+            XCTAssertEqual(
+                observer.eventNames.filter { $0 != "metrics" },
+                ["redirect"]
+            )
             XCTAssertEqual(server.requestTargets, ["/redirect"])
         }
 
@@ -85,6 +88,7 @@ import XCTest
             XCTAssertEqual(final?.response?.statusCode, 200)
             XCTAssertEqual(final?.response?.body?.contents, .bytes(responseBody))
             XCTAssertEqual(final?.response?.body?.totalByteCount, responseBody.count)
+            XCTAssertNotNil(final?.networkMetrics)
 
             assertRedirect(
                 transactions.first { $0.request.url?.path == "/middle" },
@@ -260,7 +264,10 @@ import XCTest
 
             wait(for: [completion], timeout: 3)
             XCTAssertNotNil(observer.completionError)
-            XCTAssertEqual(observer.eventNames, ["complete"])
+            XCTAssertEqual(
+                observer.eventNames.filter { $0 != "metrics" },
+                ["complete"]
+            )
             XCTAssertFalse(server.requestTargets.isEmpty)
             XCTAssertTrue(server.requestTargets.allSatisfy { $0 == "/failure" })
         }
@@ -272,11 +279,13 @@ import XCTest
             let port = try server.start()
             defer { server.stop() }
 
-            let unexpectedCallback = expectation(
-                description: "No callback is delivered after cancellation"
+            let unexpectedClientCallback = expectation(
+                description: "No client-facing callback is delivered after cancellation"
             )
-            unexpectedCallback.isInverted = true
-            let observer = TransportObserverSpy(anyCallbackExpectation: unexpectedCallback)
+            unexpectedClientCallback.isInverted = true
+            let observer = TransportObserverSpy(
+                anyCallbackExpectation: unexpectedClientCallback
+            )
             let task = WindshieldURLSessionTransport.shared.makeTask(
                 for: request(port: port, path: "/held"),
                 observer: observer
@@ -286,8 +295,8 @@ import XCTest
             XCTAssertTrue(server.waitForRequest(timeout: 2))
             task.cancel()
 
-            wait(for: [unexpectedCallback], timeout: 0.5)
-            XCTAssertTrue(observer.eventNames.isEmpty)
+            wait(for: [unexpectedClientCallback], timeout: 0.5)
+            XCTAssertTrue(observer.eventNames.allSatisfy { $0 == "metrics" })
             XCTAssertEqual(server.requestTargets, ["/held"])
         }
 
@@ -319,6 +328,7 @@ import XCTest
                 file: file,
                 line: line
             )
+            XCTAssertNotNil(transaction.networkMetrics, file: file, line: line)
             XCTAssertEqual(destination?.path, destinationPath, file: file, line: line)
         }
     }
@@ -367,6 +377,12 @@ import XCTest
 
         func transportDidReceive(_: Data) {
             record("data")
+        }
+
+        func transportDidCollect(_: WindshieldNetworkMetrics) {
+            lock.withLock {
+                events.append("metrics")
+            }
         }
 
         func transportDidComplete(with error: Error?) {

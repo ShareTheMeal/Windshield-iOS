@@ -4,6 +4,7 @@ import Foundation
     protocol WindshieldTransportObserver: AnyObject {
         func transportDidReceive(_ response: URLResponse)
         func transportDidReceive(_ data: Data)
+        func transportDidCollect(_ metrics: WindshieldNetworkMetrics)
         func transportDidComplete(with error: Error?)
         func transportDidRedirect(to request: URLRequest, response: HTTPURLResponse)
     }
@@ -30,13 +31,14 @@ import Foundation
     {
         static let shared = WindshieldURLSessionTransport()
 
-        private struct WeakObserver {
-            weak var value: WindshieldTransportObserver?
+        private struct TaskRecord {
+            let observer: WindshieldTransportObserver
+            var suppressesCompletion = false
         }
 
         private let lock = NSLock()
         private let delegateQueue: OperationQueue
-        private var observers: [Int: WeakObserver] = [:]
+        private var taskRecords: [Int: TaskRecord] = [:]
         private var session: URLSession!
 
         override private init() {
@@ -66,32 +68,57 @@ import Foundation
             let task = session.dataTask(with: request)
 
             lock.lock()
-            observers[task.taskIdentifier] = WeakObserver(value: observer)
+            taskRecords[task.taskIdentifier] = TaskRecord(observer: observer)
             lock.unlock()
 
             return WindshieldURLSessionTask(task: task, transport: self)
         }
 
         fileprivate func cancel(_ task: URLSessionDataTask) {
-            lock.lock()
-            observers.removeValue(forKey: task.taskIdentifier)
-            lock.unlock()
+            suppressCompletion(for: task)
 
             task.cancel()
         }
 
-        private func observer(for task: URLSessionTask) -> WindshieldTransportObserver? {
+        @discardableResult
+        private func suppressCompletion(
+            for task: URLSessionTask
+        ) -> WindshieldTransportObserver? {
             lock.lock()
-            let observer = observers[task.taskIdentifier]?.value
+            defer { lock.unlock() }
+
+            guard var record = taskRecords[task.taskIdentifier] else {
+                return nil
+            }
+
+            record.suppressesCompletion = true
+            taskRecords[task.taskIdentifier] = record
+            return record.observer
+        }
+
+        private func observerForDelivery(
+            for task: URLSessionTask
+        ) -> WindshieldTransportObserver? {
+            lock.lock()
+            let record = taskRecords[task.taskIdentifier]
+            lock.unlock()
+            return record?.suppressesCompletion == false ? record?.observer : nil
+        }
+
+        private func observerForMetrics(
+            for task: URLSessionTask
+        ) -> WindshieldTransportObserver? {
+            lock.lock()
+            let observer = taskRecords[task.taskIdentifier]?.observer
             lock.unlock()
             return observer
         }
 
-        private func removeObserver(for task: URLSessionTask) -> WindshieldTransportObserver? {
+        private func removeRecord(for task: URLSessionTask) -> TaskRecord? {
             lock.lock()
-            let observer = observers.removeValue(forKey: task.taskIdentifier)?.value
+            let record = taskRecords.removeValue(forKey: task.taskIdentifier)
             lock.unlock()
-            return observer
+            return record
         }
     }
 
@@ -102,7 +129,7 @@ import Foundation
             didReceive response: URLResponse,
             completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
         ) {
-            guard let observer = observer(for: dataTask) else {
+            guard let observer = observerForDelivery(for: dataTask) else {
                 completionHandler(.cancel)
                 return
             }
@@ -116,7 +143,16 @@ import Foundation
             dataTask: URLSessionDataTask,
             didReceive data: Data
         ) {
-            observer(for: dataTask)?.transportDidReceive(data)
+            observerForDelivery(for: dataTask)?.transportDidReceive(data)
+        }
+
+        func urlSession(
+            _: URLSession,
+            task: URLSessionTask,
+            didFinishCollecting metrics: URLSessionTaskMetrics
+        ) {
+            let snapshot = WindshieldNetworkMetrics(metrics: metrics)
+            observerForMetrics(for: task)?.transportDidCollect(snapshot)
         }
 
         func urlSession(
@@ -124,7 +160,13 @@ import Foundation
             task: URLSessionTask,
             didCompleteWithError error: Error?
         ) {
-            removeObserver(for: task)?.transportDidComplete(with: error)
+            guard let record = removeRecord(for: task),
+                  !record.suppressesCompletion
+            else {
+                return
+            }
+
+            record.observer.transportDidComplete(with: error)
         }
 
         func urlSession(
@@ -134,7 +176,7 @@ import Foundation
             newRequest request: URLRequest,
             completionHandler: @escaping (URLRequest?) -> Void
         ) {
-            let observer = removeObserver(for: task)
+            let observer = suppressCompletion(for: task)
             observer?.transportDidRedirect(to: request, response: response)
             completionHandler(nil)
         }

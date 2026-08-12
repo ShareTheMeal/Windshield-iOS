@@ -72,7 +72,8 @@ import Foundation
                         response: nil,
                         state: .inFlight,
                         startedAt: startedAt,
-                        endedAt: nil
+                        endedAt: nil,
+                        networkMetrics: nil
                     ),
                     at: 0
                 )
@@ -84,6 +85,16 @@ import Foundation
                 }
 
                 transactions[index].response = response
+                return true
+
+            case let .receivedNetworkMetrics(id, metrics):
+                guard let index = transactions.firstIndex(where: { $0.id == id }),
+                      transactions[index].networkMetrics == nil
+                else {
+                    return false
+                }
+
+                transactions[index].networkMetrics = metrics
                 return true
 
             case let .completed(id, body, endedAt):

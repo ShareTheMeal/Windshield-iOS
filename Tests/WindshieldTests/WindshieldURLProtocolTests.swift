@@ -266,6 +266,52 @@ import XCTest
             XCTAssertEqual(context.client.loadedData, partialBody)
         }
 
+        func testMetricsCanBeRecordedAfterTerminalDeliveryWithoutReopeningTheClient() {
+            let context = makeContext(
+                request: request(url: "https://api.example.com/items")
+            )
+            let metrics = WindshieldNetworkMetrics(
+                raw: .init(
+                    taskStartDate: Date(timeIntervalSince1970: 10),
+                    taskEndDate: Date(timeIntervalSince1970: 10.25),
+                    attempts: []
+                )
+            )
+
+            context.protocolInstance.startLoading()
+            context.transport.complete()
+            context.transport.send(metrics)
+
+            XCTAssertEqual(context.client.eventNames, ["finish"])
+            guard case let .receivedNetworkMetrics(_, recordedMetrics) =
+                context.recorder.events.last
+            else {
+                return XCTFail("Expected metrics after the terminal event")
+            }
+            XCTAssertEqual(recordedMetrics, metrics)
+        }
+
+        func testIgnoredRequestAlsoIgnoresCollectedMetrics() {
+            let context = makeContext(
+                request: request(url: "https://metrics.example.com/items"),
+                options: Windshield.Options(ignoredHosts: ["metrics.example.com"])
+            )
+            let metrics = WindshieldNetworkMetrics(
+                raw: .init(
+                    taskStartDate: Date(timeIntervalSince1970: 10),
+                    taskEndDate: Date(timeIntervalSince1970: 11),
+                    attempts: []
+                )
+            )
+
+            context.protocolInstance.startLoading()
+            context.transport.send(metrics)
+            context.transport.complete()
+
+            XCTAssertTrue(context.recorder.events.isEmpty)
+            XCTAssertEqual(context.client.eventNames, ["finish"])
+        }
+
         func testRepeatedStartLoadingCreatesOneTransportTaskAndOneTransaction() {
             let context = makeContext(request: request(url: "https://example.com/items"))
 
@@ -984,6 +1030,10 @@ import XCTest
 
         func send(_ data: Data) {
             observer?.transportDidReceive(data)
+        }
+
+        func send(_ metrics: WindshieldNetworkMetrics) {
+            observer?.transportDidCollect(metrics)
         }
 
         func complete(with error: Error? = nil) {
