@@ -27,8 +27,10 @@ import XCTest
             let originalClasses = configuration.protocolClasses
             let registration = ProtocolRegistrationSpy()
             let diagnostics = DiagnosticSpy()
+            let options = OptionsSpy()
             let runtime = runtime(
                 registration: registration,
+                options: options,
                 diagnostics: diagnostics
             )
 
@@ -39,6 +41,7 @@ import XCTest
                 originalClasses?.map(ObjectIdentifier.init)
             )
             XCTAssertEqual(registration.callCount, 0)
+            XCTAssertTrue(options.values.isEmpty)
             XCTAssertEqual(
                 diagnostics.messages,
                 ["[Windshield] Background URL sessions cannot use custom URL protocols"]
@@ -102,10 +105,10 @@ import XCTest
 
         func testConcurrentGlobalStartRegistersTheProtocolExactlyOnce() {
             let registration = ProtocolRegistrationSpy()
-            let retention = RetentionLimitSpy()
+            let options = OptionsSpy()
             let runtime = runtime(
                 registration: registration,
-                retention: retention
+                options: options
             )
 
             DispatchQueue.concurrentPerform(iterations: 64) { _ in
@@ -113,8 +116,8 @@ import XCTest
             }
 
             XCTAssertEqual(registration.callCount, 1)
-            XCTAssertEqual(retention.values.count, 64)
-            XCTAssertTrue(retention.values.allSatisfy { $0 == 25 })
+            XCTAssertEqual(options.values.count, 64)
+            XCTAssertTrue(options.values.allSatisfy { $0.maximumTransactions == 25 })
         }
 
         func testConcurrentPublicTargetedStartInstrumentsIndependentConfigurations() async {
@@ -139,15 +142,16 @@ import XCTest
             recorder.configure(
                 maximumTransactionCount: WindshieldRetentionPolicy.defaultMaximumTransactionCount
             )
+            WindshieldCapturePolicyStore.shared.configure(options: Windshield.Options())
             await recorder.flush()
         }
 
         func testTargetedStartForwardsInvalidRetentionLimitToThePolicyLayer() {
             let registration = ProtocolRegistrationSpy()
-            let retention = RetentionLimitSpy()
+            let options = OptionsSpy()
             let runtime = runtime(
                 registration: registration,
-                retention: retention
+                options: options
             )
 
             runtime.start(
@@ -155,17 +159,47 @@ import XCTest
                 maximumTransactionCount: -10
             )
 
-            XCTAssertEqual(retention.values, [-10])
+            XCTAssertEqual(options.values.map(\.maximumTransactions), [-10])
+        }
+
+        func testTargetedOptionsStartForwardsTheCompleteConfiguration() {
+            let options = Windshield.Options(
+                maximumTransactions: 42,
+                additionalRedactedHeaderNames: ["X-API-Key"],
+                ignoredHosts: ["metrics.example.com"],
+                ignoredURLRules: [
+                    .init(host: "api.example.com", pathPrefix: "/health"),
+                ],
+                metadataOnlyURLRules: [
+                    .init(
+                        host: "api.example.com",
+                        pathPrefix: "/payments",
+                        httpMethods: ["POST"]
+                    ),
+                ]
+            )
+            let optionsSpy = OptionsSpy()
+            let runtime = runtime(
+                registration: ProtocolRegistrationSpy(),
+                options: optionsSpy
+            )
+
+            runtime.start(
+                intercepting: URLSessionConfiguration.ephemeral,
+                options: options
+            )
+
+            XCTAssertEqual(optionsSpy.values, [options])
         }
 
         private func runtime(
             registration: ProtocolRegistrationSpy,
-            retention: RetentionLimitSpy? = nil,
+            options: OptionsSpy? = nil,
             diagnostics: DiagnosticSpy? = nil
         ) -> WindshieldRuntime {
             WindshieldRuntime(
                 registerProtocol: { registration.register() },
-                applyRetentionLimit: { value in retention?.apply(value) },
+                applyOptions: { value in options?.apply(value) },
                 emitDiagnostic: { message in diagnostics?.emit(message) }
             )
         }
@@ -189,18 +223,18 @@ import XCTest
         }
     }
 
-    private final class RetentionLimitSpy: @unchecked Sendable {
+    private final class OptionsSpy: @unchecked Sendable {
         private let lock = NSLock()
-        private var storedValues: [Int] = []
+        private var storedValues: [Windshield.Options] = []
 
-        var values: [Int] {
+        var values: [Windshield.Options] {
             lock.lock()
             let values = storedValues
             lock.unlock()
             return values
         }
 
-        func apply(_ value: Int) {
+        func apply(_ value: Windshield.Options) {
             lock.lock()
             storedValues.append(value)
             lock.unlock()
