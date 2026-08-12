@@ -2,7 +2,7 @@
 
 Windshield follows [Semantic Versioning](https://semver.org/).
 
-## 0.5.0 - Unreleased
+## 0.5.0 - 2026-08-12
 
 ### Added
 
@@ -12,6 +12,7 @@ Windshield follows [Semantic Versioning](https://semver.org/).
 - Normalized `URLSessionTaskMetrics` capture for DNS, connection, TLS, request, first-byte waiting, response transfer, byte counts, fetch source, protocol, proxy use, connection reuse, attempts, and redirects.
 - A Slow filter, top-three host latency summaries, and compact per-attempt timing waterfalls.
 - Safe ImageIO thumbnail generation with decoded-dimension limits and background processing.
+- Pull-request, feature-request, and bug-report templates for consistent contributions.
 
 ### Changed
 
@@ -31,10 +32,7 @@ Windshield follows [Semantic Versioning](https://semver.org/).
 
 - Share/export and persistence remain future work. They were not pulled into this release.
 
-## 0.4.0 - Unreleased
-
-This privacy milestone is already on `main` and will be included in `0.5.0`;
-no separate `0.4.0` tag was published.
+## 0.4.0 - 2026-08-12
 
 ### Added
 
@@ -55,7 +53,7 @@ no separate `0.4.0` tag was published.
 - Metadata-only capture forwards every response byte to the host app while keeping those bytes out of Windshield's buffer.
 - Policy replacement is lock-protected and covered by strict-concurrency and concurrent snapshot tests.
 
-## 0.3.0 - 2026-08-10
+## 0.3.0 - 2026-08-12
 
 ### Added
 
@@ -77,22 +75,40 @@ no separate `0.4.0` tag was published.
 
 ## 0.2.0 - 2026-08-10
 
-This is the first tagged pre-1.0 release of Windshield.
+This release hardens the original inspector for strict-concurrency toolchains.
 
 ### Added
 
-- A development-only SwiftUI inspector for viewing captured traffic on-device.
-- In-memory transaction storage with bounded request and response bodies, transaction retention, and a total body-data budget.
-- Search, filtering, request and response details, copy actions, empty states, and clear confirmation.
-- A deterministic demo UI smoke test and CI validation for strict concurrency, Thread Sanitizer, iOS package builds, and Debug and Release consumers.
-- An MIT license.
+- Version-based Swift Package Manager installation guidance and a release changelog.
+- A regression test for automatic main-actor store publication.
 
 ### Changed
 
-- Separated targeted session configuration from best-effort global registration.
-- Serialized URL protocol lifecycle callbacks and recorder publication to make cancellation, completion, redirects, and UI updates thread-safe.
-- Excluded Windshield implementation code from Release builds.
-- Documented privacy and session-fidelity limitations, including challenge-based authentication and custom trust handling.
+- Store publication no longer transfers a task-isolated recorder reference into a main-actor closure, preserving complete strict-concurrency builds with warnings treated as errors.
+
+### Fixed
+
+- Automatic store updates now compile cleanly under Swift 6 concurrency diagnostics while remaining compatible with the package's Swift 5 language mode.
+
+## 0.1.0 - 2026-07-28
+
+The first public development-only Windshield package.
+
+### Added
+
+- `URLProtocol`-based interception for outgoing HTTP and HTTPS requests made through compatible `URLSession` configurations.
+- Request and response capture for URLs, methods, headers, status codes, timing, errors, and bounded bodies.
+- A bounded, in-memory transaction store with live main-actor publication.
+- A native SwiftUI traffic inspector with search, filters, request and response details, copy actions, empty states, and clear confirmation.
+- Minimal global and configuration-based `Windshield.start()` entry points.
+- A sample iOS app, integration guide, deterministic UI smoke test, package validation workflow, and MIT license.
+
+### Changed
+
+- Targeted session configuration is separated from best-effort global registration.
+- URL protocol lifecycle callbacks and recorder publication are serialized so cancellation, completion, redirects, and UI updates remain thread-safe.
+- Windshield implementation code is excluded from Release builds.
+- Privacy and session-fidelity limitations, including challenge-based authentication and custom trust handling, are documented.
 
 ### Fixed
 
@@ -100,3 +116,9 @@ This is the first tagged pre-1.0 release of Windshield.
 - Preserved and recorded multi-hop redirect lifecycles.
 - Removed an unsupported authentication challenge bridge that could leave intercepted requests waiting indefinitely.
 - Preserved preemptive `Authorization` headers while using Foundation's default challenge handling.
+
+### Safety
+
+- Windshield is compiled for Debug builds only and keeps captured traffic on-device in memory.
+- Recursive interception is prevented, payload and transaction retention are bounded, and captured traffic is not printed to the console.
+- Targeted configuration setup is separated from best-effort global registration.

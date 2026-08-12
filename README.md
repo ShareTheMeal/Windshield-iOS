@@ -15,17 +15,9 @@ The interception core also builds on macOS 12 for package tests and tooling. The
 
 ## Add the package
 
-Add the repository URL in Xcode under **File → Add Package Dependencies**.
-Until `0.5.0` is tagged, select the `main` branch. A package manifest can use:
-
-```swift
-.package(
-    url: "https://github.com/initishbhatt/Windshield.git",
-    branch: "main"
-)
-```
-
-After the `0.5.0` tag is published, prefer a version-based dependency:
+Add the repository URL in Xcode under **File → Add Package Dependencies** and
+select **Up to Next Major Version** starting at `0.5.0`. A package manifest can
+use:
 
 ```swift
 .package(
