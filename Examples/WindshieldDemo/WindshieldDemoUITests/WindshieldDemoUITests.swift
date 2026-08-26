@@ -28,10 +28,8 @@ final class WindshieldDemoUITests: XCTestCase {
         app.buttons["Open Windshield"].tap()
         XCTAssertTrue(app.navigationBars["Windshield"].waitForExistence(timeout: 5))
 
-        XCTAssertTrue(
-            element(containingLabel: "1 total requests, 0 errors, 0 active", in: app)
-                .waitForExistence(timeout: 5)
-        )
+        XCTAssertTrue(app.buttons["All"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Clear traffic"].waitForExistence(timeout: 5))
 
         let transaction = element(
             containingLabel: "GET 127.0.0.1/fixture, 200",

@@ -34,32 +34,18 @@
                     WindshieldRequestSummary(transaction: transaction)
                 }
 
-                Section("Overview") {
-                    WindshieldMetadataRow(
-                        title: "Started",
-                        value: WindshieldDisplayFormatter.time(transaction.startedAt)
+                Section {
+                    WindshieldOverviewGrid(
+                        items: overviewItems(for: transaction)
                     )
-                    WindshieldMetadataRow(
-                        title: "Duration",
-                        value: WindshieldDisplayFormatter.duration(transaction.duration)
-                    )
-                    WindshieldMetadataRow(
-                        title: "Request body",
-                        value: bodySize(transaction.request.body)
-                    )
-                    WindshieldMetadataRow(
-                        title: "Response body",
-                        value: responseBodySize(transaction)
-                    )
-                    if let contentType = contentType(transaction.response?.headers ?? []) {
-                        WindshieldMetadataRow(title: "Content-Type", value: contentType)
-                    }
                     if case let .redirected(destination) = transaction.state {
                         WindshieldMetadataRow(
                             title: "Redirect destination",
                             value: destination?.absoluteString ?? "Unknown"
                         )
                     }
+                } header: {
+                    WindshieldInspectorSectionHeader(title: "Overview")
                 }
 
                 if let metrics = transaction.networkMetrics {
@@ -87,21 +73,63 @@
                         contentType: contentType(response.headers)
                     )
                 } else {
-                    Section("Response") {
+                    Section {
                         Text(transaction.state == .inFlight ? "Waiting for response." : "No response received.")
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
+                    } header: {
+                        WindshieldInspectorSectionHeader(title: "Response")
                     }
                 }
 
                 if let failure = transaction.failure {
-                    Section("Failure") {
+                    Section {
                         WindshieldMetadataRow(title: "Message", value: failure.message)
                         WindshieldMetadataRow(title: "Domain", value: failure.domain)
                         WindshieldMetadataRow(title: "Code", value: String(failure.code))
+                    } header: {
+                        WindshieldInspectorSectionHeader(
+                            title: "Failure",
+                            color: .red
+                        )
                     }
                 }
             }
             .listStyle(.insetGrouped)
+            .environment(\.defaultMinListRowHeight, 44)
+        }
+
+        private func overviewItems(
+            for transaction: WindshieldTransaction
+        ) -> [WindshieldOverviewItem] {
+            var items = [
+                WindshieldOverviewItem(
+                    title: "Started",
+                    value: WindshieldDisplayFormatter.time(transaction.startedAt)
+                ),
+                WindshieldOverviewItem(
+                    title: "Duration",
+                    value: WindshieldDisplayFormatter.duration(transaction.duration)
+                ),
+                WindshieldOverviewItem(
+                    title: "Request body",
+                    value: bodySize(transaction.request.body)
+                ),
+                WindshieldOverviewItem(
+                    title: "Response body",
+                    value: responseBodySize(transaction)
+                ),
+            ]
+
+            if let contentType = contentType(transaction.response?.headers ?? []) {
+                items.append(
+                    WindshieldOverviewItem(
+                        title: "Content-Type",
+                        value: contentType
+                    )
+                )
+            }
+            return items
         }
 
         private func bodySize(_ body: WindshieldBodyCapture) -> String {
@@ -136,7 +164,7 @@
         let metrics: WindshieldNetworkMetrics
 
         var body: some View {
-            Section("Performance") {
+            Section {
                 WindshieldMetadataRow(
                     title: "URLSession task time",
                     value: WindshieldDisplayFormatter.duration(metrics.taskDuration)
@@ -149,10 +177,12 @@
                     title: "Redirects",
                     value: String(metrics.redirectCount)
                 )
+            } header: {
+                WindshieldInspectorSectionHeader(title: "Performance")
             }
 
             ForEach(Array(metrics.attempts.enumerated()), id: \.offset) { index, attempt in
-                Section("Network attempt \(index + 1)") {
+                Section {
                     if let networkProtocolName = attempt.networkProtocolName {
                         WindshieldMetadataRow(
                             title: "Protocol",
@@ -192,6 +222,10 @@
                         taskDuration: metrics.taskDuration
                     )
                     .padding(.vertical, 4)
+                } header: {
+                    WindshieldInspectorSectionHeader(
+                        title: "Network attempt \(index + 1)"
+                    )
                 }
             }
         }
@@ -247,31 +281,89 @@
         let transaction: WindshieldTransaction
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     WindshieldMethodBadge(method: transaction.request.method)
                     WindshieldStatusBadge(transaction: transaction)
                     Spacer()
+                    Text(WindshieldDisplayFormatter.time(transaction.startedAt))
+                        .font(.caption.monospacedDigit())
+                        .foregroundColor(.secondary)
                 }
 
-                Text(transaction.request.url?.absoluteString ?? "Unknown URL")
-                    .font(.subheadline.monospaced())
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .center, spacing: 8) {
+                    Text(transaction.request.url?.absoluteString ?? "Unknown URL")
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                if let url = transaction.request.url?.absoluteString {
-                    Button {
-                        UIPasteboard.general.string = url
-                    } label: {
-                        Label("Copy URL", systemImage: "doc.on.doc")
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
+                    if let url = transaction.request.url?.absoluteString {
+                        Button {
+                            UIPasteboard.general.string = url
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Copy request URL")
                     }
-                    .font(.caption)
-                    .accessibilityLabel("Copy request URL")
                 }
+                .padding(.leading, 10)
+                .background(
+                    Color(.tertiarySystemFill),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    private struct WindshieldOverviewItem: Identifiable {
+        let title: String
+        let value: String
+
+        var id: String {
+            title
+        }
+    }
+
+    private struct WindshieldOverviewGrid: View {
+        let items: [WindshieldOverviewItem]
+        @Environment(\.sizeCategory) private var sizeCategory
+
+        private var columns: [GridItem] {
+            if sizeCategory.isAccessibilityCategory {
+                return [GridItem(.flexible(), spacing: 8)]
+            }
+            return [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8),
+            ]
+        }
+
+        var body: some View {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.title)
+                            .font(.caption2.weight(.medium))
+                            .foregroundColor(.secondary)
+                        Text(item.value)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .topLeading)
+                    .padding(10)
+                    .background(
+                        Color(.tertiarySystemFill),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .padding(.vertical, 2)
         }
     }
 
@@ -287,6 +379,7 @@
             Section {
                 if headers.isEmpty {
                     Text("No headers.")
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
                 } else {
                     ForEach(Array(headers.enumerated()), id: \.offset) { _, header in
@@ -311,16 +404,18 @@
 
         var body: some View {
             HStack {
-                Text(title)
+                WindshieldInspectorSectionHeader(title: title)
                 Spacer()
                 Button {
                     UIPasteboard.general.string = value
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                         .labelStyle(.titleAndIcon)
+                        .font(.caption.weight(.medium))
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                 }
+                .buttonStyle(.borderless)
                 .disabled(!isEnabled)
                 .accessibilityLabel(copyLabel)
             }

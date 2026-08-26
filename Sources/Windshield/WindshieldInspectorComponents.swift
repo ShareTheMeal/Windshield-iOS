@@ -2,80 +2,44 @@
     import Foundation
     import SwiftUI
 
-    struct WindshieldTrafficSummaryView: View {
-        let transactions: [WindshieldTransaction]
-
-        private var errorCount: Int {
-            transactions.filter(\.isError).count
-        }
-
-        private var activeCount: Int {
-            transactions.filter { $0.state == .inFlight }.count
-        }
-
-        var body: some View {
-            HStack(spacing: 0) {
-                metric(title: "Total", value: transactions.count, color: .primary)
-                Divider()
-                metric(title: "Errors", value: errorCount, color: .red)
-                Divider()
-                metric(title: "Active", value: activeCount, color: .orange)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(
-                "\(transactions.count) total requests, \(errorCount) errors, "
-                    + "\(activeCount) active"
-            )
-        }
-
-        private func metric(title: String, value: Int, color: Color) -> some View {
-            VStack(spacing: 2) {
-                Text(String(value))
-                    .font(.title3.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundColor(color)
-                Text(title)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-        }
-    }
-
     struct WindshieldFilterBar: View {
         @Binding var selection: WindshieldTrafficFilter
 
         var body: some View {
-            HStack(spacing: 8) {
-                ForEach(WindshieldTrafficFilter.allCases) { filter in
-                    Button {
-                        selection = filter
-                    } label: {
-                        Text(filter.rawValue)
-                            .font(.subheadline.weight(.medium))
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: 44)
-                            .foregroundColor(
-                                selection == filter
-                                    ? Color(.systemBackground)
-                                    : .primary
-                            )
-                            .background(
-                                Capsule()
-                                    .fill(
-                                        selection == filter
-                                            ? Color.primary
-                                            : Color(.tertiarySystemFill)
-                                    )
-                            )
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(WindshieldTrafficFilter.allCases) { filter in
+                        Button {
+                            selection = filter
+                        } label: {
+                            Text(filter.rawValue)
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                                .foregroundColor(
+                                    selection == filter
+                                        ? .white
+                                        : .primary
+                                )
+                                .background(
+                                    Capsule()
+                                        .fill(
+                                            selection == filter
+                                                ? Color(.systemBlue)
+                                                : Color(.tertiarySystemFill)
+                                        )
+                                )
+                                .frame(minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(
+                            selection == filter ? .isSelected : []
+                        )
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selection == filter ? .isSelected : [])
                 }
             }
-            .padding(.vertical, 4)
         }
     }
 
@@ -84,43 +48,81 @@
 
         var body: some View {
             if !summaries.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Slowest observed hosts")
-                        .font(.headline)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Slowest hosts")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
 
                     ForEach(summaries) { summary in
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Text(summary.host)
-                                .font(.caption.monospaced())
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer(minLength: 8)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(summary.host)
+                                    .font(.caption.monospaced())
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer(minLength: 8)
+                                Text(
+                                    "avg "
+                                        + WindshieldDisplayFormatter.duration(
+                                            summary.averageDuration
+                                        )
+                                )
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                            }
+
                             Text(
-                                "avg \(WindshieldDisplayFormatter.duration(summary.averageDuration))"
+                                "\(summary.sampleCount) observed · max "
+                                    + WindshieldDisplayFormatter.duration(
+                                        summary.maximumDuration
+                                    )
                             )
-                            .font(.caption.weight(.semibold))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
                             .monospacedDigit()
                         }
-
-                        Text(
-                            "\(summary.sampleCount) observed · max "
-                                + WindshieldDisplayFormatter.duration(
-                                    summary.maximumDuration
-                                )
-                        )
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .monospacedDigit()
                     }
                 }
-                .padding(.vertical, 6)
+                .padding(12)
+                .background(
+                    Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
                 .accessibilityElement(children: .contain)
             }
         }
     }
 
+    enum WindshieldTimelinePosition: Equatable {
+        case only
+        case first
+        case middle
+        case last
+
+        init(index: Int, count: Int) {
+            if count <= 1 {
+                self = .only
+            } else if index == 0 {
+                self = .first
+            } else if index == count - 1 {
+                self = .last
+            } else {
+                self = .middle
+            }
+        }
+
+        var drawsLineAbove: Bool {
+            self == .middle || self == .last
+        }
+
+        var drawsLineBelow: Bool {
+            self == .first || self == .middle
+        }
+    }
+
     struct WindshieldTransactionRow: View {
         let transaction: WindshieldTransaction
+        let position: WindshieldTimelinePosition
 
         private var host: String {
             transaction.request.url?.host ?? "Unknown host"
@@ -131,70 +133,131 @@
             return path.isEmpty ? "/" : path
         }
 
-        private var footer: String {
-            var values = [
-                WindshieldDisplayFormatter.time(transaction.startedAt),
-                WindshieldDisplayFormatter.duration(transaction.observedDuration),
-            ]
-            if let byteCount = transaction.responseBodyByteCount {
-                values.append(WindshieldDisplayFormatter.byteCount(byteCount))
+        private var duration: String {
+            guard let duration = transaction.observedDuration else {
+                return "—"
             }
-            return values.joined(separator: " · ")
+
+            return WindshieldDisplayFormatter.duration(duration)
+        }
+
+        private var byteCount: String {
+            guard let byteCount = transaction.responseBodyByteCount else {
+                return "—"
+            }
+
+            return WindshieldDisplayFormatter.byteCount(byteCount)
         }
 
         var body: some View {
-            HStack(alignment: .top, spacing: 12) {
-                WindshieldMethodBadge(method: transaction.request.method)
+            HStack(alignment: .top, spacing: 10) {
+                WindshieldTimelineIndicator(
+                    color: transaction.inspectorStatusColor,
+                    position: position
+                )
+                .frame(width: 8)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(host)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        WindshieldMethodBadge(
+                            method: transaction.request.method
+                        )
+                        Text(transaction.statusText)
                             .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundColor(transaction.inspectorStatusColor)
+                        Text(path)
+                            .font(.subheadline.monospaced())
                             .lineLimit(1)
-                        Spacer(minLength: 4)
-                        WindshieldStatusBadge(transaction: transaction)
+                            .truncationMode(.middle)
                     }
 
-                    Text(path)
-                        .font(.caption.monospaced())
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    Text(footer)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .monospacedDigit()
-                        .lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(host)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        Text(duration)
+                        Text(byteCount)
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
                 }
             }
-            .frame(minHeight: 44)
-            .padding(.vertical, 2)
+            .frame(minHeight: 70)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(
                 "\(transaction.request.method) \(host)\(path), "
-                    + "\(transaction.statusText), \(footer)"
+                    + "\(transaction.statusText), \(duration), \(byteCount)"
             )
+        }
+    }
+
+    private struct WindshieldTimelineIndicator: View {
+        let color: Color
+        let position: WindshieldTimelinePosition
+
+        var body: some View {
+            GeometryReader { proxy in
+                ZStack(alignment: .top) {
+                    if position.drawsLineAbove {
+                        Rectangle()
+                            .fill(Color(.separator))
+                            .frame(width: 1, height: 14)
+                    }
+
+                    if position.drawsLineBelow {
+                        Rectangle()
+                            .fill(Color(.separator))
+                            .frame(
+                                width: 1,
+                                height: max(0, proxy.size.height - 14)
+                            )
+                            .offset(y: 14)
+                    }
+
+                    Circle()
+                        .fill(color)
+                        .frame(width: 6, height: 6)
+                        .offset(y: 11)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .accessibilityHidden(true)
         }
     }
 
     struct WindshieldMethodBadge: View {
         let method: String
 
+        private var color: Color {
+            switch method.uppercased() {
+            case "GET":
+                .blue
+            case "POST":
+                .green
+            case "PUT", "PATCH":
+                .orange
+            case "DELETE":
+                .red
+            default:
+                .purple
+            }
+        }
+
         var body: some View {
             Text(method.uppercased())
-                .font(.caption2.weight(.bold).monospaced())
+                .font(.system(.caption, design: .monospaced).weight(.semibold))
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .foregroundColor(.primary)
-                .frame(width: 52, height: 24)
+                .foregroundColor(color)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
                 .background(
-                    Color(.secondarySystemBackground),
-                    in: RoundedRectangle(cornerRadius: 6)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(.separator), lineWidth: 1)
+                    color.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 5, style: .continuous)
                 )
                 .accessibilityLabel("Method \(method)")
         }
@@ -206,27 +269,28 @@
         var body: some View {
             HStack(spacing: 5) {
                 Circle()
-                    .fill(statusColor)
+                    .fill(transaction.inspectorStatusColor)
                     .frame(width: 6, height: 6)
                     .accessibilityHidden(true)
                 Text(transaction.statusText)
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundColor(.primary)
+                    .foregroundColor(transaction.inspectorStatusColor)
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(Color(.secondarySystemBackground), in: Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(statusColor.opacity(0.65), lineWidth: 1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                transaction.inspectorStatusColor.opacity(0.12),
+                in: Capsule()
             )
         }
+    }
 
-        private var statusColor: Color {
-            switch transaction.state {
+    extension WindshieldTransaction {
+        var inspectorStatusColor: Color {
+            switch state {
             case .inFlight:
-                .orange
+                .blue
             case .failed:
                 .red
             case .cancelled:
@@ -234,7 +298,7 @@
             case .redirected:
                 .orange
             case .completed:
-                switch transaction.response?.statusCode ?? 0 {
+                switch response?.statusCode ?? 0 {
                 case 200 ..< 300:
                     .green
                 case 300 ..< 400:
@@ -245,6 +309,20 @@
                     .secondary
                 }
             }
+        }
+    }
+
+    struct WindshieldInspectorSectionHeader: View {
+        let title: String
+        var color: Color = .secondary
+
+        var body: some View {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .tracking(0.35)
+                .foregroundColor(color)
+                .accessibilityLabel(title)
+                .accessibilityAddTraits(.isHeader)
         }
     }
 
@@ -278,7 +356,7 @@
         var body: some View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.caption)
+                    .font(.caption.weight(.medium))
                     .foregroundColor(.secondary)
                 Text(value)
                     .font(.subheadline.monospaced())

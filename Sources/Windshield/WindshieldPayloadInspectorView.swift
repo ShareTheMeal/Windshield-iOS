@@ -189,6 +189,12 @@
                     Label(noticeText(notice), systemImage: "info.circle")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            Color(.tertiarySystemFill),
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        )
                 }
 
                 if supportsSearch {
@@ -215,8 +221,17 @@
                             .textSelection(.enabled)
                             .fixedSize(horizontal: true, vertical: false)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
                             .accessibilityIdentifier("Windshield payload text")
                     }
+                    .background(
+                        Color(.tertiarySystemFill),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color(.separator).opacity(0.35), lineWidth: 0.5)
+                    )
                 }
             }
         }
@@ -224,17 +239,20 @@
         private func payloadMetadata(
             _ presentation: WindshieldPayloadPresentation
         ) -> some View {
-            VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(kindLabel(presentation))
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color(.secondarySystemBackground), in: Capsule())
+                    .padding(.vertical, 3)
+                    .foregroundColor(.blue)
+                    .background(Color.blue.opacity(0.12), in: Capsule())
 
                 if let mimeType = presentation.mimeType {
                     Text(mimeType)
                         .font(.caption2.monospaced())
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                         .textSelection(.enabled)
                 }
             }
@@ -372,8 +390,17 @@
                             .resizable()
                             .scaledToFit()
                             .frame(maxWidth: .infinity, maxHeight: 320)
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(
+                                        Color(.separator).opacity(0.35),
+                                        lineWidth: 0.5
+                                    )
+                            )
                             .accessibilityLabel(
                                 "Captured image, \(width) by \(height) pixels"
                             )

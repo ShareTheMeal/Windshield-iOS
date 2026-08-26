@@ -35,38 +35,79 @@
         public var body: some View {
             NavigationView {
                 List {
-                    WindshieldTrafficSummaryView(transactions: store.transactions)
-                        .listRowSeparator(.hidden)
-
                     WindshieldFilterBar(selection: $selectedFilter)
+                        .listRowInsets(
+                            EdgeInsets(
+                                top: 0,
+                                leading: 16,
+                                bottom: 0,
+                                trailing: 16
+                            )
+                        )
                         .listRowSeparator(.hidden)
 
-                    WindshieldHostLatencyView(summaries: hostLatencySummaries)
-                        .listRowSeparator(.hidden)
+                    if selectedFilter == .slow {
+                        WindshieldHostLatencyView(summaries: hostLatencySummaries)
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 0,
+                                    leading: 16,
+                                    bottom: 8,
+                                    trailing: 16
+                                )
+                            )
+                            .listRowSeparator(.hidden)
+                    }
 
                     if visibleTransactions.isEmpty {
                         emptyState
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 0,
+                                    leading: 16,
+                                    bottom: 0,
+                                    trailing: 16
+                                )
+                            )
                             .listRowSeparator(.hidden)
                     } else {
-                        ForEach(visibleTransactions) { transaction in
+                        ForEach(
+                            Array(visibleTransactions.enumerated()),
+                            id: \.element.id
+                        ) { index, transaction in
                             NavigationLink {
                                 WindshieldTransactionDetailView(
                                     transactionID: transaction.id,
                                     store: store
                                 )
                             } label: {
-                                WindshieldTransactionRow(transaction: transaction)
+                                WindshieldTransactionRow(
+                                    transaction: transaction,
+                                    position: WindshieldTimelinePosition(
+                                        index: index,
+                                        count: visibleTransactions.count
+                                    )
+                                )
                             }
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 0,
+                                    leading: 16,
+                                    bottom: 0,
+                                    trailing: 12
+                                )
+                            )
                         }
                     }
                 }
                 .listStyle(.plain)
+                .environment(\.defaultMinListRowHeight, 1)
                 .navigationTitle("Windshield")
-                .navigationBarTitleDisplayMode(.large)
+                .navigationBarTitleDisplayMode(.inline)
                 .searchable(
                     text: $searchText,
                     placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: "Search traffic"
+                    prompt: "Search"
                 )
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
@@ -75,9 +116,12 @@
                         }
                     }
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Clear") {
+                        Button {
                             isConfirmingClear = true
+                        } label: {
+                            Image(systemName: "trash")
                         }
+                        .accessibilityLabel("Clear traffic")
                         .disabled(store.transactions.isEmpty)
                     }
                 }
