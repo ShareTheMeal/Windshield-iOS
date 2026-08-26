@@ -2,6 +2,19 @@
 
 Windshield follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- A scene-scoped `Windshield.start(on:)` convenience for UIKit apps that owns gesture installation and inspector presentation.
+- `Windshield.installInspector(on:)` for apps that use reliable configuration-based interception and only need UIKit presentation.
+
+### Changed
+
+- The traffic screen now uses a compact native activity timeline, inline navigation, smaller filter controls, and contextual slow-host diagnostics.
+- Request details now continue the same visual system with semantic status treatments, compact overview cards, scannable section headers, and code-focused payload surfaces.
+- The deliberate long-press trigger uses one finger in Simulator and three fingers on a physical device while preserving the one-second hold and non-blocking touch behavior.
+
 ## 0.5.0 - 2026-08-12
 
 ### Added

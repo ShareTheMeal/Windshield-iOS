@@ -46,7 +46,7 @@ struct ContentView: View {
                             isInspectorPresented = true
                         }
                     } footer: {
-                        Text("Touch and hold with three fingers, or use the button. Windshield is available only in Debug builds.")
+                        Text("Hold with three fingers on a device or one finger in Simulator, or use the button. Windshield is available only in Debug builds.")
                     }
                 #endif
             }

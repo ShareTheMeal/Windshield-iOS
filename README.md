@@ -28,7 +28,7 @@ use:
 
 Add `Windshield` to the application target. Keep setup and presentation code inside `#if DEBUG` because the implementation is intentionally excluded from Release builds.
 
-## Minimal integration
+## Minimal SwiftUI integration
 
 The smallest Debug integration is one startup call and one root view modifier.
 This global setup is convenient when you do not control how every network
@@ -63,13 +63,60 @@ struct ExampleApp: App {
 ```
 
 `start()` begins capture but never opens UI by itself. The modifier gives SwiftUI
-a window-scoped presentation anchor; a deliberate three-finger, one-second hold
-then opens the inspector. This split avoids process-wide window lookup,
-first-responder takeover, and presenting over an existing host modal.
+a window-scoped presentation anchor. A one-second hold with three fingers on a
+device, or one finger in Simulator, then opens the inspector. This split avoids
+process-wide window lookup, first-responder takeover, and presenting over an
+existing host modal.
 
 If some requests do not appear, use the configuration-based setup below for the
 sessions your app creates. Calling the global `start()` repeatedly will not
 retrofit a session that already exists.
+
+## Minimal UIKit integration
+
+UIKit apps do not need to create a gesture recognizer, hosting controller, or
+presentation coordinator. Give Windshield the scene's window after assigning
+its root view controller:
+
+```swift
+import UIKit
+
+#if DEBUG
+import Windshield
+#endif
+
+func scene(
+    _ scene: UIScene,
+    willConnectTo session: UISceneSession,
+    options connectionOptions: UIScene.ConnectionOptions
+) {
+    guard let windowScene = scene as? UIWindowScene else { return }
+
+    let window = UIWindow(windowScene: windowScene)
+    window.rootViewController = AppViewController()
+    self.window = window
+    window.makeKeyAndVisible()
+
+    #if DEBUG
+    Windshield.start(on: window)
+    #endif
+}
+```
+
+`start(on:)` combines best-effort global capture with a passive, scene-scoped
+inspector trigger. It never searches application windows and never presents over
+an existing host modal. Call it once for each scene window that should expose
+Windshield.
+
+When the app owns its session configuration, keep the reliable targeted capture
+setup and install only the presentation layer on the window:
+
+```swift
+#if DEBUG
+Windshield.start(intercepting: configuration)
+Windshield.installInspector(on: window)
+#endif
+```
 
 ## Start interception
 
@@ -181,7 +228,8 @@ inspector when changing a policy during a run.
 ## Present the inspector
 
 Attach the inspector modifier once near the root of each window. Touch and hold
-anywhere with three fingers for one second to open the inspector as a sheet:
+anywhere for one second with three fingers on a device, or one finger in
+Simulator, to open the inspector as a sheet:
 
 ```swift
 var body: some View {
@@ -246,7 +294,7 @@ The inspector provides:
 - Request and response headers
 - MIME-aware JSON, HTML source, XML, text, form, multipart-summary, and image views
 - Search and highlighted matches within captured textual request and response bodies
-- URLSession task timing, redirects, byte counts, per-attempt waterfalls, and slow-host summaries
+- URLSession task timing, redirects, byte counts, per-attempt waterfalls, and contextual slow-host summaries
 - Copy actions for URLs, headers, and bodies
 - Clear confirmation and useful empty states
 
