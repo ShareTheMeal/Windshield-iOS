@@ -3,7 +3,8 @@
 
     /// A deliberate, user-initiated gesture that can present the inspector.
     public enum WindshieldInspectorTrigger: Sendable {
-        /// Presents after three fingers remain pressed for one second.
+        /// Presents after a one-second hold with three fingers on a device or
+        /// one finger in Simulator.
         case threeFingerLongPress
     }
 
