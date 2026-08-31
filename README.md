@@ -1,5 +1,7 @@
 # Windshield
 
+[![CI](https://github.com/initishbhatt/Windshield/actions/workflows/ci.yml/badge.svg)](https://github.com/initishbhatt/Windshield/actions/workflows/ci.yml)
+
 Windshield is a development-only HTTP inspector for iOS. It captures `URLSession` traffic with `URLProtocol` and gives your debug build a native SwiftUI traffic viewer, directly on the device.
 
 Windshield keeps captured traffic in memory. It does not persist, upload, or print request data to the console. Common credential and cookie headers are redacted before they enter that in-memory log.
@@ -27,6 +29,35 @@ use:
 ```
 
 Add `Windshield` to the application target. Keep setup and presentation code inside `#if DEBUG` because the implementation is intentionally excluded from Release builds.
+
+## Choose an integration
+
+Capture and presentation are separate. Choose each call based on who creates the
+network session and how the app presents debug tools:
+
+| Situation | Call | What it does |
+| --- | --- | --- |
+| A framework creates the session | `Windshield.start()` | Enables best-effort global interception for compatible sessions created after the call. |
+| Your app creates the configuration | `Windshield.start(intercepting:)` | Reliably inserts Windshield into that configuration before the session copies it. |
+| A UIKit app needs the inspector UI | `Windshield.installInspector(on:)` | Installs only the window-scoped gesture and presentation layer. It does not start capture. |
+| A UIKit app wants global capture and UI | `Windshield.start(on:)` | Combines best-effort global capture with `installInspector(on:)`. |
+
+Apps often need more than one row. For example, an app can call `start()` early
+for framework-owned sessions, instrument every app-owned configuration before
+creating its session, and install the UIKit inspector after its scene window is
+ready:
+
+```swift
+#if DEBUG
+Windshield.start()                              // Best effort for framework sessions
+Windshield.start(intercepting: configuration)  // Reliable for this configuration
+Windshield.installInspector(on: window)         // Presentation only
+#endif
+```
+
+Global registration cannot retrofit an existing session. Targeted interception
+does not register Windshield globally, and installing the inspector does not
+change networking.
 
 ## Minimal SwiftUI integration
 
@@ -118,18 +149,11 @@ Windshield.installInspector(on: window)
 #endif
 ```
 
-## Start interception
+## Instrument app-owned sessions
 
-Choose the setup based on who creates the network session:
-
-- If your app creates the `URLSessionConfiguration`, use the configuration-based
-  setup below. This is the reliable and recommended path.
-- If a framework creates the session, call the global `Windshield.start()` as
-  early as possible. Global interception remains best effort.
-
-For a session your app creates, instrument its configuration before creating the
-session. This changes only the supplied configuration and does not register
-Windshield process-wide.
+Instrument a configuration before creating its session. This changes only the
+supplied configuration and does not register Windshield process-wide or install
+the inspector UI.
 
 ```swift
 #if DEBUG
@@ -147,15 +171,9 @@ func makeSession() -> URLSession {
 }
 ```
 
-For sessions owned by a framework, call the global form as early as possible during app startup:
-
-```swift
-#if DEBUG
-Windshield.start()
-#endif
-```
-
-Global `URLProtocol` registration is best effort. It cannot retrofit sessions that already exist, and some networking stacks do not consult globally registered protocols.
+For framework-owned sessions, call the global form as early as possible during
+app startup. Global `URLProtocol` registration is best effort: some networking
+stacks do not consult globally registered protocols.
 
 Windshield retains up to 100 transactions by default. You can choose another limit:
 

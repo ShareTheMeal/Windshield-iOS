@@ -7,6 +7,10 @@
         /// Starts best-effort global capture and installs the inspector trigger on
         /// one UIKit window.
         ///
+        /// This is equivalent to calling `start(maximumTransactions:)` followed by
+        /// `installInspector(on:)`. Use `start(intercepting:)` separately for every
+        /// app-owned session configuration that needs reliable interception.
+        ///
         /// Call this once for each scene window that should expose Windshield.
         /// The trigger is passive and never presents over an existing host modal.
         @MainActor
@@ -20,6 +24,10 @@
 
         /// Starts best-effort global capture with custom options and installs the
         /// inspector trigger on one UIKit window.
+        ///
+        /// This is equivalent to calling `start(options:)` followed by
+        /// `installInspector(on:)`. Use `start(intercepting:options:)` separately for
+        /// every app-owned session configuration that needs reliable interception.
         @MainActor
         static func start(
             on window: UIWindow,
@@ -32,7 +40,8 @@
         /// Installs the inspector trigger without changing capture configuration.
         ///
         /// Use this after `start(intercepting:)` when the app owns its URL session
-        /// configuration. Repeated installation on the same window is idempotent.
+        /// configuration. This method does not register a URL protocol or start
+        /// capture. Repeated installation on the same window is idempotent.
         @MainActor
         static func installInspector(
             on window: UIWindow,

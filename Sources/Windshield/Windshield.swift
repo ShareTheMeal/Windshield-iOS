@@ -73,7 +73,8 @@ import Foundation
         /// after this call. Call this as early as possible during app startup.
         ///
         /// Sessions owned by the app should use `start(intercepting:)` for reliable
-        /// interception.
+        /// interception. This method does not retrofit existing sessions or install
+        /// the inspector interface.
         public static func start(
             maximumTransactions: Int = 100
         ) {
@@ -86,12 +87,16 @@ import Foundation
         ///
         /// Options are process-wide. A later setup call replaces them for requests
         /// that have not started yet; an in-flight request keeps its original policy.
+        /// This method does not install the inspector interface.
         public static func start(options: Options) {
             WindshieldRuntime.shared.startGlobally(options: options)
         }
 
         /// Enables Windshield and installs it into a session configuration before
         /// the session copies that configuration.
+        ///
+        /// This method changes only the supplied configuration. It does not register
+        /// Windshield globally or install the inspector interface.
         ///
         /// Custom URL protocols are not supported by background configurations.
         public static func start(
@@ -106,6 +111,9 @@ import Foundation
 
         /// Installs Windshield into a session configuration and applies process-wide
         /// privacy and capture options.
+        ///
+        /// This method changes only the supplied configuration. It does not register
+        /// Windshield globally or install the inspector interface.
         ///
         /// A later setup call replaces the options for requests that have not started
         /// yet. Custom URL protocols are not supported by background configurations.
