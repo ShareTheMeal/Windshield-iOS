@@ -2,7 +2,7 @@
 
 Windshield follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.5.1 - 2026-08-31
 
 ### Added
 
