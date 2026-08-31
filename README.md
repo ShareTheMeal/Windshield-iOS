@@ -18,13 +18,13 @@ The interception core also builds on macOS 12 for package tests and tooling. The
 ## Add the package
 
 Add the repository URL in Xcode under **File → Add Package Dependencies** and
-select **Up to Next Major Version** starting at `0.5.1`. A package manifest can
+select **Up to Next Major Version** starting at `0.5.2`. A package manifest can
 use:
 
 ```swift
 .package(
     url: "https://github.com/initishbhatt/Windshield.git",
-    from: "0.5.1"
+    from: "0.5.2"
 )
 ```
 
@@ -38,7 +38,7 @@ network session and how the app presents debug tools:
 | Situation | Call | What it does |
 | --- | --- | --- |
 | A framework creates the session | `Windshield.start()` | Enables best-effort global interception for compatible sessions created after the call. |
-| Your app creates the configuration | `Windshield.start(intercepting:)` | Reliably inserts Windshield into that configuration before the session copies it. |
+| Your app creates the configuration | `Windshield.start(intercepting:)` | Reliably inserts Windshield into a compatible default or ephemeral configuration before the session copies it. |
 | A UIKit app needs the inspector UI | `Windshield.installInspector(on:)` | Installs only the window-scoped gesture and presentation layer. It does not start capture. |
 | A UIKit app wants global capture and UI | `Windshield.start(on:)` | Combines best-effort global capture with `installInspector(on:)`. |
 
@@ -426,7 +426,7 @@ xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' buil
 
 ## Project status
 
-The latest release is `0.5.1`. Windshield follows
+The latest release is `0.5.2`. Windshield follows
 [Semantic Versioning](https://semver.org/); while the package is below `1.0.0`,
 its public API may evolve between minor releases.
 

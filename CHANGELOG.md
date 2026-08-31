@@ -2,6 +2,18 @@
 
 Windshield follows [Semantic Versioning](https://semver.org/).
 
+## 0.5.2 - 2026-09-01
+
+### Added
+
+- A security policy with private reporting guidance for vulnerabilities involving captured traffic.
+- A runnable, storyboard-free UIKit demo showing targeted interception and package-owned inspector presentation.
+
+### Changed
+
+- Integration guidance now clearly separates best-effort global interception, reliable configuration-based interception, and presentation-only setup.
+- The project page now includes CI status and discovery metadata.
+
 ## 0.5.1 - 2026-08-31
 
 ### Added
