@@ -16,13 +16,13 @@ The interception core also builds on macOS 12 for package tests and tooling. The
 ## Add the package
 
 Add the repository URL in Xcode under **File → Add Package Dependencies** and
-select **Up to Next Major Version** starting at `0.5.0`. A package manifest can
+select **Up to Next Major Version** starting at `0.5.1`. A package manifest can
 use:
 
 ```swift
 .package(
     url: "https://github.com/initishbhatt/Windshield.git",
-    from: "0.5.0"
+    from: "0.5.1"
 )
 ```
 
@@ -201,7 +201,7 @@ Windshield.start(intercepting: configuration, options: options)
 For best-effort global registration, pass the same value to
 `Windshield.start(options: options)` instead.
 
-The policies have deliberately narrow behavior:
+Policy behavior:
 
 - Additional header names extend the secure default set and are matched
   case-insensitively.
@@ -405,14 +405,12 @@ xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' buil
 
 ## Project status
 
-The next tagged release is `0.5.0`; its implementation is currently available
-from `main`. Windshield follows [Semantic Versioning](https://semver.org/). While
-the package is below `1.0.0`, its public API may evolve between minor releases.
+The latest release is `0.5.1`. Windshield follows
+[Semantic Versioning](https://semver.org/); while the package is below `1.0.0`,
+its public API may evolve between minor releases.
 
-Persistence, export, replay, response rewriting, and additional automatic
-presentation triggers are intentionally outside this release. Windshield remains
-a read-only inspector: it never changes an app's request or response payload.
-See [CHANGELOG.md](CHANGELOG.md) for release details.
+Windshield remains a read-only inspector and never changes an app's request or
+response payload. See [CHANGELOG.md](CHANGELOG.md) for release details.
 
 ## License
 
