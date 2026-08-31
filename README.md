@@ -411,7 +411,10 @@ Windshield is designed for debug diagnostics, not production monitoring.
 
 ## Try the demo
 
-Open `Examples/WindshieldDemo/WindshieldDemo.xcodeproj`, run the `WindshieldDemo` scheme, send the sample request, then use the three-finger long press or the manual button. The example consumes this repository as a local Swift package.
+Open `Examples/WindshieldDemo/WindshieldDemo.xcodeproj` and run either the
+SwiftUI `WindshieldDemo` scheme or the storyboard-free `WindshieldUIKitDemo`
+scheme. Both examples instrument an app-owned session configuration and consume
+this repository as a local Swift package.
 
 ## Validate changes
 

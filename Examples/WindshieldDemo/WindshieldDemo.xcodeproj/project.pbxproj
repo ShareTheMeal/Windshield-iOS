@@ -12,6 +12,10 @@
 		A10000000000000000000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* Assets.xcassets */; };
 		A10000000000000000000004 /* Windshield in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000002 /* Windshield */; };
 		A10000000000000000000005 /* WindshieldDemoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* WindshieldDemoUITests.swift */; };
+		B10000000000000000000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* AppDelegate.swift */; };
+		B10000000000000000000002 /* UIKitDemoViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* UIKitDemoViewController.swift */; };
+		B10000000000000000000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* Assets.xcassets */; };
+		B10000000000000000000004 /* Windshield in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000002 /* Windshield */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,6 +36,9 @@
 		A20000000000000000000005 /* WindshieldDemoUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindshieldDemoUITests.swift; sourceTree = "<group>"; };
 		A20000000000000000000006 /* WindshieldDemoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WindshieldDemoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B20000000000000000000001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* UIKitDemoViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKitDemoViewController.swift; sourceTree = "<group>"; };
+		B20000000000000000000003 /* WindshieldUIKitDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WindshieldUIKitDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -50,6 +57,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000004 /* Windshield in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -57,6 +72,7 @@
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000002 /* WindshieldDemo */,
+				B40000000000000000000001 /* WindshieldUIKitDemo */,
 				A40000000000000000000004 /* WindshieldDemoUITests */,
 				A40000000000000000000003 /* Products */,
 			);
@@ -77,6 +93,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000004 /* WindshieldDemo.app */,
+				B20000000000000000000003 /* WindshieldUIKitDemo.app */,
 				A20000000000000000000006 /* WindshieldDemoUITests.xctest */,
 			);
 			name = Products;
@@ -88,6 +105,15 @@
 				A20000000000000000000005 /* WindshieldDemoUITests.swift */,
 			);
 			path = WindshieldDemoUITests;
+			sourceTree = "<group>";
+		};
+		B40000000000000000000001 /* WindshieldUIKitDemo */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000001 /* AppDelegate.swift */,
+				B20000000000000000000002 /* UIKitDemoViewController.swift */,
+			);
+			path = WindshieldUIKitDemo;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -131,6 +157,26 @@
 			productReference = A20000000000000000000006 /* WindshieldDemoUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		B50000000000000000000001 /* WindshieldUIKitDemo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B90000000000000000000001 /* Build configuration list for PBXNativeTarget "WindshieldUIKitDemo" */;
+			buildPhases = (
+				B60000000000000000000001 /* Sources */,
+				B30000000000000000000001 /* Frameworks */,
+				B70000000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WindshieldUIKitDemo;
+			packageProductDependencies = (
+				AA0000000000000000000002 /* Windshield */,
+			);
+			productName = WindshieldUIKitDemo;
+			productReference = B20000000000000000000003 /* WindshieldUIKitDemo.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -147,6 +193,9 @@
 					A50000000000000000000002 = {
 						CreatedOnToolsVersion = 26.6;
 						TestTargetID = A50000000000000000000001;
+					};
+					B50000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
 					};
 				};
 			};
@@ -167,6 +216,7 @@
 			projectRoot = "";
 			targets = (
 				A50000000000000000000001 /* WindshieldDemo */,
+				B50000000000000000000001 /* WindshieldUIKitDemo */,
 				A50000000000000000000002 /* WindshieldDemoUITests */,
 			);
 		};
@@ -188,6 +238,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B70000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000003 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -205,6 +263,15 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000005 /* WindshieldDemoUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000001 /* AppDelegate.swift in Sources */,
+				B10000000000000000000002 /* UIKitDemoViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -428,6 +495,60 @@
 			};
 			name = Release;
 		};
+		BB0000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = NO;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.windshield.uikitdemo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		BB0000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = NO;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.windshield.uikitdemo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -454,6 +575,15 @@
 			buildConfigurations = (
 				AB0000000000000000000005 /* Debug */,
 				AB0000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B90000000000000000000001 /* Build configuration list for PBXNativeTarget "WindshieldUIKitDemo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB0000000000000000000001 /* Debug */,
+				BB0000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
