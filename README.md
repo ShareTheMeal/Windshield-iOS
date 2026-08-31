@@ -430,6 +430,12 @@ its public API may evolve between minor releases.
 Windshield remains a read-only inspector and never changes an app's request or
 response payload. See [CHANGELOG.md](CHANGELOG.md) for release details.
 
+## Security
+
+Report vulnerabilities privately and never attach real captured traffic or
+credentials. See [SECURITY.md](SECURITY.md) for supported versions and reporting
+guidance.
+
 ## License
 
 Windshield is available under the MIT License. See [LICENSE](LICENSE).
