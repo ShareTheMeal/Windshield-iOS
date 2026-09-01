@@ -10,7 +10,7 @@ issue still exists there before reporting it.
 
 ## Report a vulnerability
 
-Use [GitHub's private vulnerability reporting](https://github.com/initishbhatt/Windshield/security/advisories/new).
+Use [GitHub's private vulnerability reporting](https://github.com/ShareTheMeal/Windshield-iOS/security/advisories/new).
 Do not open a public issue for a suspected vulnerability.
 
 Never attach real captured traffic, credentials, access tokens, personal data,

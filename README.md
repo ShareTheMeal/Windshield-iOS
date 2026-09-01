@@ -1,8 +1,10 @@
 # Windshield
 
-[![CI](https://github.com/initishbhatt/Windshield/actions/workflows/ci.yml/badge.svg)](https://github.com/initishbhatt/Windshield/actions/workflows/ci.yml)
+[![CI](https://github.com/ShareTheMeal/Windshield-iOS/actions/workflows/ci.yml/badge.svg)](https://github.com/ShareTheMeal/Windshield-iOS/actions/workflows/ci.yml)
 
 Windshield is a development-only HTTP inspector for iOS. It captures `URLSession` traffic with `URLProtocol` and gives your debug build a native SwiftUI traffic viewer, directly on the device.
+
+Windshield is maintained by [ShareTheMeal](https://github.com/ShareTheMeal).
 
 Windshield keeps captured traffic in memory. It does not persist, upload, or print request data to the console. Common credential and cookie headers are redacted before they enter that in-memory log.
 
@@ -18,13 +20,13 @@ The interception core also builds on macOS 12 for package tests and tooling. The
 ## Add the package
 
 Add the repository URL in Xcode under **File → Add Package Dependencies** and
-select **Up to Next Major Version** starting at `0.5.2`. A package manifest can
+select **Up to Next Major Version** starting at `0.6.0`. A package manifest can
 use:
 
 ```swift
 .package(
-    url: "https://github.com/initishbhatt/Windshield.git",
-    from: "0.5.2"
+    url: "https://github.com/ShareTheMeal/Windshield-iOS.git",
+    from: "0.6.0"
 )
 ```
 
@@ -426,7 +428,7 @@ xcodebuild -scheme Windshield -destination 'generic/platform=iOS Simulator' buil
 
 ## Project status
 
-The latest release is `0.5.2`. Windshield follows
+The latest release is `0.6.0`. Windshield follows
 [Semantic Versioning](https://semver.org/); while the package is below `1.0.0`,
 its public API may evolve between minor releases.
 

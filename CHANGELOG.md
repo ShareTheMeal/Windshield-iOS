@@ -2,6 +2,14 @@
 
 Windshield follows [Semantic Versioning](https://semver.org/).
 
+## 0.6.0 - 2026-09-01
+
+### Changed
+
+- Windshield is now maintained by ShareTheMeal at its new canonical repository, `ShareTheMeal/Windshield-iOS`.
+- Package installation, CI, and private security-reporting links now use the ShareTheMeal repository.
+- The MIT License copyright attribution now names ShareTheMeal.
+
 ## 0.5.2 - 2026-09-01
 
 ### Added
